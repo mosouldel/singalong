@@ -139,6 +139,9 @@ function isBehindProxy() {
   const h = location.hostname, p = location.port;
   return (h === "localhost" || h === "127.0.0.1") && (p === "8787" || p === "8765" || p === "3000" || p === "");
 }
+function isFileProtocol() {
+  return location.protocol === "file:";
+}
 async function nativeHttp(url, opts) {
   const CapHttp = getNativePlugin("CapacitorHttp") || (window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp);
   if (!CapHttp) throw new Error("CapacitorHttp 不可用");
@@ -610,6 +613,9 @@ async function qqLyrics(song) {
 /* ================= 搜索与歌词编排 ================= */
 async function search(q) {
   const preferred = settings.source === "auto" ? ["lrclib", "qq"] : [settings.source];
+  if (isFileProtocol() && settings.source !== "auto" && settings.source !== "lrclib") {
+    throw new Error("当前歌词来源需要本地服务：请双击 preview.bat，然后访问 http://localhost:8787 再测试");
+  }
   const sources = preferred.concat(["lrclib", "qq"].filter(function (src) { return preferred.indexOf(src) < 0; }));
   let lastErr = null;
   let sawEmpty = false;
