@@ -115,7 +115,14 @@ async function webFetch(url, opts) {
 }
 async function fetchText(url, opts) {
   opts = opts || {};
-  if (isNative()) return nativeHttp(url, opts);
+  if (isNative()) {
+    if (url.indexOf(LRCLIB) === 0) {
+      // LRCLIB is CORS-enabled; use the WebView browser network stack so it works on 5G mobile data.
+      try { return await webFetch(url, opts); }
+      catch (e) { return await nativeHttp(url, opts); }
+    }
+    return nativeHttp(url, opts);
+  }
   if (isBehindProxy()) {
     if ((opts.method || "GET").toUpperCase() === "POST") {
       return webFetch("/proxy", {
