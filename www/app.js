@@ -465,7 +465,7 @@ async function neteaseLyrics(song) {
 
 /* ================= 搜索与歌词编排 ================= */
 async function search(q) {
-  const sources = settings.source === "auto" ? ["lrclib", "netease", "mojim"] : [settings.source];
+  const sources = settings.source === "auto" ? ["lrclib", "netease"] : [settings.source];
   let lastErr = null;
   let sawEmpty = false;
   for (const src of sources) {
@@ -509,7 +509,7 @@ async function loadMoreResults() {
 }
 async function loadLyricsForSong(song) {
   let lastErr = null;
-  const order = ["lrclib", "netease", "mojim"].filter(function (src) {
+  const order = (settings.source === "auto" ? ["lrclib", "netease"] : [settings.source]).filter(function (src) {
     if (src === "lrclib" && !song.lrclibId) return false;
     return true;
   });
@@ -1016,7 +1016,7 @@ function renderSettings() {
     '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">歌词来源</span></div>'
     + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("netease", "网易云") + seg("mojim", "Mojim") + '</div></div>'
-    + '<p class="hint">自动：先试 LRCLIB（最稳），再试网易云（模糊搜索、港乐较全），最后试 Mojim（需开 VPN）。</p>'
+    + '<p class="hint">自动：先试 LRCLIB（最稳），再试网易云（模糊搜索、港乐较全）。Mojim 需手动选择并开 VPN。</p>'
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">数据备份</span></div>'
