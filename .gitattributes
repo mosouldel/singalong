@@ -1,0 +1,3 @@
+*.keystore binary
+*.jks binary
+*.p12 binary
