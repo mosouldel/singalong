@@ -7,6 +7,7 @@ const REQUESTS_KEY = "singalong.requests.v1";
 const LRCLIB = "https://lrclib.net/api";
 const MOJIGECI = "https://mojigeci.com/zh-Hans";
 const MOJIM = "https://mojim.org";
+const NETEASE = "https://music.163.com";
 const UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
 
 const state = {
@@ -41,6 +42,7 @@ function songKey(s) { return ((s.title || "").trim().toLowerCase()) + "||" + ((s
 function getSong(id) { return library.find(function (s) { return s.id === id; }); }
 function srcLabel(src) {
   if (src === "lrclib") return "LRCLIB";
+  if (src === "netease") return "网易云";
   if (src === "mojim") return "Mojim";
   return "魔镜歌词";
 }
@@ -87,6 +89,7 @@ function loadSettings() {
     const r = JSON.parse(localStorage.getItem(SETTINGS_KEY));
     if (r && typeof r === "object") settings = Object.assign({ source: "auto" }, r);
   } catch (e) {}
+  if (settings.source === "mojigeci") settings.source = "auto";
 }
 function saveSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
@@ -416,9 +419,53 @@ async function mojimLyrics(song) {
   throw lastErr || new Error("Mojim 没有解析到歌词");
 }
 
+/* ================= 歌词源：网易云音乐 ================= */
+function neteaseSongArray(data) {
+  if (data && data.result && Array.isArray(data.result.songs)) return data.result.songs;
+  return [];
+}
+async function neteaseSearch(q) {
+  const url = NETEASE + "/api/search/get/web?csrf_token=hlpretag=&hlposttag=&s=" + encodeURIComponent(q) + "&type=1&offset=0&total=true&limit=30";
+  const text = await fetchText(url, { headers: { Accept: "application/json", Referer: NETEASE + "/search/", "User-Agent": UA } });
+  let data;
+  try { data = JSON.parse(text); } catch (e) { return []; }
+  return neteaseSongArray(data).map(function (it) {
+    const artists = Array.isArray(it.artists) ? it.artists.map(function (a) { return a && a.name; }).filter(Boolean) : [];
+    return {
+      id: "netease:" + it.id,
+      title: it.name || "",
+      artist: artists.join("/") || "未知歌手",
+      album: (it.album && it.album.name) || "",
+      lyricist: "", composer: "",
+      source: "网易云",
+      neteaseId: it.id,
+      duration: Math.round((it.duration || 0) / 1000) || 0,
+    };
+  }).filter(function (s) { return s.title; });
+}
+async function neteaseLyrics(song) {
+  let id = song.neteaseId;
+  if (!id) {
+    const q = ((song.title || "") + " " + (song.artist || "未知歌手")).trim();
+    const items = await neteaseSearch(q);
+    let hit = items.find(function (i) { return i.title === song.title || (song.title && i.title && (song.title.indexOf(i.title) >= 0 || i.title.indexOf(song.title) >= 0)); });
+    if (!hit) hit = items[0];
+    if (hit && hit.neteaseId) id = hit.neteaseId;
+  }
+  if (!id) throw new Error("网易云未找到该歌曲");
+  const url = NETEASE + "/api/song/lyric?id=" + encodeURIComponent(id) + "&lv=1&kv=1&tv=-1";
+  const text = await fetchText(url, { headers: { Accept: "application/json", Referer: NETEASE + "/song?id=" + encodeURIComponent(id), "User-Agent": UA } });
+  let data;
+  try { data = JSON.parse(text); } catch (e) { data = {}; }
+  const raw = (data.lrc && data.lrc.lyric) || (data.tlyric && data.tlyric.lyric) || "";
+  const lines = parseLrc(raw);
+  if (lines.length) return { lines: lines, artist: "" };
+  throw new Error("网易云没有解析到歌词");
+}
+
 /* ================= 搜索与歌词编排 ================= */
 async function search(q) {
-  const sources = settings.source === "auto" ? ["lrclib", "mojim", "mojigeci"] : [settings.source];
+  const sources = settings.source === "auto" ? ["lrclib", "netease", "mojim"] : [settings.source];
   let lastErr = null;
   let sawEmpty = false;
   for (const src of sources) {
@@ -433,15 +480,17 @@ async function search(q) {
 }
 async function searchBySource(src, q) {
   if (src === "lrclib") return lrclibSearch(q);
+  if (src === "netease") return neteaseSearch(q);
   if (src === "mojim") return mojimSearch(q);
-  return mojigeciSearch(q);
+  if (src === "mojigeci") return mojigeciSearch(q);
+  return [];
 }
 async function loadMoreResults() {
   const q = state.searchedFor;
   if (!q) return;
-  toast("正在从魔镜歌词补充…");
+  toast("正在从网易云音乐补充…");
   try {
-    const items = await mojigeciSearch(q);
+    const items = await neteaseSearch(q);
     const seen = new Set(state.results.map(function (r) { return songKey(r); }));
     let added = 0;
     for (const it of items) {
@@ -451,16 +500,16 @@ async function loadMoreResults() {
       state.results.push(it);
       added++;
     }
-    if (added) state.resultsSource = state.resultsSource + " + 魔镜歌词";
+    if (added) state.resultsSource = state.resultsSource + " + 网易云";
     render();
-    toast(added ? "魔镜补充了 " + added + " 条结果" : "魔镜没有补充到新结果");
+    toast(added ? "网易云补充了 " + added + " 条结果" : "网易云没有补充到新结果");
   } catch (e) {
-    toast("魔镜补充失败：" + (e && e.message ? e.message : e));
+    toast("网易云补充失败：" + (e && e.message ? e.message : e));
   }
 }
 async function loadLyricsForSong(song) {
   let lastErr = null;
-  const order = ["lrclib", "mojim", "mojigeci"].filter(function (src) {
+  const order = ["lrclib", "netease", "mojim"].filter(function (src) {
     if (src === "lrclib" && !song.lrclibId) return false;
     return true;
   });
@@ -475,14 +524,18 @@ async function loadLyricsForSong(song) {
 }
 async function loadLyricsBySource(src, song) {
   if (src === "lrclib") return lrclibLyrics(song);
+  if (src === "netease") return neteaseLyrics(song);
   if (src === "mojim") {
     const res = await mojimLyrics(song);
     if (res.artist && (!song.artist || song.artist === "未知歌手")) song.artist = res.artist;
     return res.lines;
   }
-  const res = await mojigeciLyrics(song);
-  if (res.artist && (!song.artist || song.artist === "未知歌手")) song.artist = res.artist;
-  return res.lines;
+  if (src === "mojigeci") {
+    const res = await mojigeciLyrics(song);
+    if (res.artist && (!song.artist || song.artist === "未知歌手")) song.artist = res.artist;
+    return res.lines;
+  }
+  throw new Error("未知歌词来源");
 }
 
 /* ================= 曲库操作 ================= */
@@ -501,6 +554,7 @@ function addSong(raw) {
     lrclibId: raw.lrclibId || null,
     mojigeciUrl: raw.mojigeciUrl || null,
     mojimId: raw.mojimId || null,
+    neteaseId: raw.neteaseId || null,
     tag: "会唱",
     addedAt: Date.now(),
     lyrics: Array.isArray(raw.lyrics) ? raw.lyrics : [],
@@ -539,6 +593,7 @@ function normalizeImported(raw) {
     lrclibId: raw.lrclibId || null,
     mojigeciUrl: raw.mojigeciUrl || null,
     mojimId: raw.mojimId || null,
+    neteaseId: raw.neteaseId || null,
     tag: raw.tag === "想学" ? "想学" : "会唱",
     addedAt: raw.addedAt || Date.now(),
     lyrics: Array.isArray(raw.lyrics) ? raw.lyrics : [],
@@ -813,7 +868,7 @@ function renderSearch() {
   if (state.results.length) {
     let html = '<div class="source-note">来自 ' + esc(state.resultsSource) + ' · ' + state.results.length + ' 条结果</div>';
     if (state.resultsSource === "LRCLIB" && state.results.length >= 20) {
-      html += '<div class="more-row"><button class="load-btn" data-action="more-results" type="button">LRCLIB 最多返回 20 条，点这里用魔镜补充更多</button></div>';
+      html += '<div class="more-row"><button class="load-btn" data-action="more-results" type="button">LRCLIB 最多返回 20 条，点这里用网易云补充更多</button></div>';
     }
     html += state.results.map(function (r, i) { return resultRowHtml(r, i); }).join("");
     return html;
@@ -960,8 +1015,8 @@ function renderSettings() {
   $("#settingsBody").innerHTML =
     '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">歌词来源</span></div>'
-    + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("mojigeci", "魔镜") + seg("mojim", "Mojim") + '</div></div>'
-    + '<p class="hint">自动：先试 LRCLIB（最稳），再试 Mojim（mojim.org，需开 VPN），最后试魔镜歌词。</p>'
+    + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("netease", "网易云") + seg("mojim", "Mojim") + '</div></div>'
+    + '<p class="hint">自动：先试 LRCLIB（最稳），再试网易云（模糊搜索、港乐较全），最后试 Mojim（需开 VPN）。</p>'
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">数据备份</span></div>'
