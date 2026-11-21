@@ -175,6 +175,12 @@ async function fetchText(url, opts) {
     }
     return nativeHttp(url, opts);
   }
+  if (isBehindProxy() && (url.indexOf(LRCLIB) === 0 || url.indexOf(MOJIGECI) === 0)) {
+    // These services are CORS-enabled; try the browser directly first to avoid
+    // a local proxy 502, then fall through to the proxy if direct access fails.
+    try { return await webFetch(url, opts); }
+    catch (e) { }
+  }
   if (isBehindProxy()) {
     if ((opts.method || "GET").toUpperCase() === "POST") {
       return webFetch("/proxy", {
@@ -191,23 +197,33 @@ async function fetchText(url, opts) {
 }
 /* ================= 歌词源：LRCLIB ================= */
 async function lrclibSearch(q) {
-  const text = await fetchText(LRCLIB + "/search?q=" + encodeURIComponent(q), { headers: { Accept: "application/json" } });
-  const data = JSON.parse(text);
-  if (!Array.isArray(data)) return [];
-  return data.map(function (it) {
-    return {
-      id: "lrclib:" + it.id,
-      title: it.trackName || "",
-      artist: it.artistName || "",
-      album: it.albumName || "",
-      lyricist: "",
-      composer: "",
-      source: "LRCLIB",
-      lrclibId: it.id,
-      instrumental: !!it.instrumental,
-      duration: it.duration || 0,
-    };
-  }).filter(function (s) { return s.title; });
+  const urls = [
+    LRCLIB + "/api/v2/search?q=" + encodeURIComponent(q),
+    LRCLIB + "/api/search?q=" + encodeURIComponent(q),
+  ];
+  let lastErr = null;
+  for (const url of urls) {
+    try {
+      const text = await fetchText(url, { headers: { Accept: "application/json" } });
+      const data = JSON.parse(text);
+      if (!Array.isArray(data)) continue;
+      return data.map(function (it) {
+        return {
+          id: "lrclib:" + it.id,
+          title: it.trackName || it.name || "",
+          artist: it.artistName || it.artist || "",
+          album: it.albumName || it.album || "",
+          lyricist: "",
+          composer: "",
+          source: "LRCLIB",
+          lrclibId: it.id,
+          instrumental: !!it.instrumental,
+          duration: it.duration || 0,
+        };
+      }).filter(function (s) { return s.title; });
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("LRCLIB 搜索失败");
 }
 async function lrclibLyrics(song) {
   async function fetchById(id) {
