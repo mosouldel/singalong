@@ -6,6 +6,7 @@ const SETTINGS_KEY = "singalong.settings.v1";
 const REQUESTS_KEY = "singalong.requests.v1";
 const LRCLIB = "https://lrclib.net/api";
 const MOJIGECI = "https://mojigeci.com/zh-Hans";
+const MOJIM = "https://mojim.org";
 const UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
 
 const state = {
@@ -38,7 +39,11 @@ function byAddedDesc(a, b) { return b.addedAt - a.addedAt; }
 function byTitle(a, b) { return (a.title || "").localeCompare(b.title || "", "zh-Hans-CN"); }
 function songKey(s) { return ((s.title || "").trim().toLowerCase()) + "||" + ((s.artist || "").trim().toLowerCase()); }
 function getSong(id) { return library.find(function (s) { return s.id === id; }); }
-function srcLabel(src) { return src === "lrclib" ? "LRCLIB" : "魔镜歌词"; }
+function srcLabel(src) {
+  if (src === "lrclib") return "LRCLIB";
+  if (src === "mojim") return "Mojim";
+  return "魔镜歌词";
+}
 
 let toastTimer = null;
 function hideToast() {
@@ -310,37 +315,124 @@ function parseMojigeciLyrics(html, title) {
   while (cleaned.length && cleaned[cleaned.length - 1] === "") cleaned.pop();
   return { lines: cleaned, artist: artist };
 }
+/* ================= 歌词源：Mojim（mojim.org，需 VPN） ================= */
+function mojimArray(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object") {
+    for (const k of ["results", "data", "items", "songs", "tracks", "list"]) {
+      if (Array.isArray(data[k])) return data[k];
+    }
+  }
+  return [];
+}
+function mojimPick(obj, keys) {
+  for (const k of keys) {
+    if (obj && obj[k] != null && obj[k] !== "") return obj[k];
+  }
+  return "";
+}
+function extractLyricsLines(data) {
+  const o = (data && typeof data === "object") ? data : {};
+  const synced = mojimPick(o, ["syncedLyrics", "lrc"]);
+  if (synced) { const l = parseLrc(String(synced)); if (l.length) return l; }
+  const plain = mojimPick(o, ["plainLyrics", "lyrics", "lyric", "content", "text"]);
+  if (typeof plain === "string") {
+    const lines = String(plain).split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    if (lines.length) return lines;
+  }
+  for (const k of ["lines", "lyricsLines"]) {
+    if (Array.isArray(o[k]) && o[k].length) return o[k].map(function (s) { return String(s).trim(); }).filter(Boolean);
+  }
+  return [];
+}
+async function mojimSearch(q) {
+  const url = MOJIM + "/api/v1/search?q=" + encodeURIComponent(q) + "&limit=30";
+  const text = await fetchText(url, { headers: { Accept: "application/json" } });
+  let data;
+  try { data = JSON.parse(text); } catch (e) { data = []; }
+  const arr = mojimArray(data);
+  return arr.map(function (it) {
+    const id = mojimPick(it, ["id", "song_id", "sid", "track_id", "trackId"]);
+    const title = mojimPick(it, ["title", "name", "song_name", "track_name", "trackName", "song", "song_title"]);
+    return {
+      id: "mojim:" + (id || encodeURIComponent(title)),
+      title: title,
+      artist: mojimPick(it, ["artist", "artist_name", "artistName", "singer", "singer_name", "performers"]),
+      album: mojimPick(it, ["album", "album_name", "albumName"]),
+      lyricist: "", composer: "",
+      source: "Mojim",
+      mojimId: id,
+    };
+  }).filter(function (s) { return s.title; });
+}
+async function mojimLyrics(song) {
+  let id = song.mojimId;
+  if (!id) {
+    const q = ((song.title || "") + " " + (song.artist || "未知歌手")).trim();
+    const items = await mojimSearch(q);
+    let hit = items.find(function (i) { return i.title === song.title || (song.title && i.title && (song.title.indexOf(i.title) >= 0 || i.title.indexOf(song.title) >= 0)); });
+    if (!hit) hit = items[0];
+    if (hit && hit.mojimId) id = hit.mojimId;
+  }
+  if (!id) throw new Error("Mojim 未找到该歌曲");
+  const candidates = [MOJIM + "/api/v1/song/" + id, MOJIM + "/api/v1/lyrics/" + id, MOJIM + "/api/v1/get/" + id];
+  let lastErr = null;
+  for (const u of candidates) {
+    try {
+      const text = await fetchText(u, { headers: { Accept: "application/json" } });
+      const data = JSON.parse(text);
+      const lines = extractLyricsLines(data);
+      if (lines.length) return { lines: lines, artist: "" };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("Mojim 没有解析到歌词");
+}
+
 /* ================= 搜索与歌词编排 ================= */
 async function search(q) {
-  const order = settings.source === "auto" ? ["lrclib", "mojigeci"] : [settings.source];
+  const sources = settings.source === "auto" ? ["lrclib", "mojigeci", "mojim"] : [settings.source];
   let lastErr = null;
-  for (const src of order) {
+  let sawEmpty = false;
+  for (const src of sources) {
     try {
-      const items = src === "lrclib" ? await lrclibSearch(q) : await mojigeciSearch(q);
+      const items = await searchBySource(src, q);
       if (items && items.length) return { source: srcLabel(src), items: items };
+      sawEmpty = true;
       lastErr = new Error("没有结果");
-    } catch (e) { lastErr = e; }
+    } catch (e) { if (!sawEmpty) lastErr = e; }
   }
   throw lastErr || new Error("搜索失败");
 }
+async function searchBySource(src, q) {
+  if (src === "lrclib") return lrclibSearch(q);
+  if (src === "mojim") return mojimSearch(q);
+  return mojigeciSearch(q);
+}
 async function loadLyricsForSong(song) {
   let lastErr = null;
-  const order = song.lrclibId ? ["lrclib", "mojigeci"] : ["mojigeci", "lrclib"];
+  const order = ["lrclib", "mojigeci", "mojim"].filter(function (src) {
+    if (src === "lrclib" && !song.lrclibId) return false;
+    return true;
+  });
   for (const src of order) {
     try {
-      let lines;
-      if (src === "lrclib") {
-        lines = await lrclibLyrics(song);
-      } else {
-        const res = await mojigeciLyrics(song);
-        if (res.artist && (!song.artist || song.artist === "未知歌手")) song.artist = res.artist;
-        lines = res.lines;
-      }
+      const lines = await loadLyricsBySource(src, song);
       if (lines && lines.length) return { lines: lines, source: srcLabel(src) };
       lastErr = new Error("没有歌词");
     } catch (e) { lastErr = e; }
   }
   throw lastErr || new Error("歌词加载失败");
+}
+async function loadLyricsBySource(src, song) {
+  if (src === "lrclib") return lrclibLyrics(song);
+  if (src === "mojim") {
+    const res = await mojimLyrics(song);
+    if (res.artist && (!song.artist || song.artist === "未知歌手")) song.artist = res.artist;
+    return res.lines;
+  }
+  const res = await mojigeciLyrics(song);
+  if (res.artist && (!song.artist || song.artist === "未知歌手")) song.artist = res.artist;
+  return res.lines;
 }
 
 /* ================= 曲库操作 ================= */
@@ -358,6 +450,7 @@ function addSong(raw) {
     source: raw.source || "手动",
     lrclibId: raw.lrclibId || null,
     mojigeciUrl: raw.mojigeciUrl || null,
+    mojimId: raw.mojimId || null,
     tag: "会唱",
     addedAt: Date.now(),
     lyrics: Array.isArray(raw.lyrics) ? raw.lyrics : [],
@@ -395,6 +488,7 @@ function normalizeImported(raw) {
     source: raw.source || "导入",
     lrclibId: raw.lrclibId || null,
     mojigeciUrl: raw.mojigeciUrl || null,
+    mojimId: raw.mojimId || null,
     tag: raw.tag === "想学" ? "想学" : "会唱",
     addedAt: raw.addedAt || Date.now(),
     lyrics: Array.isArray(raw.lyrics) ? raw.lyrics : [],
@@ -813,8 +907,8 @@ function renderSettings() {
   $("#settingsBody").innerHTML =
     '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">歌词来源</span></div>'
-    + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("mojigeci", "魔镜") + '</div></div>'
-    + '<p class="hint">自动：先试 LRCLIB（开放接口、更稳定），失败再试魔镜歌词（中文/港台/日韩更全）。</p>'
+    + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("mojigeci", "魔镜") + seg("mojim", "Mojim") + '</div></div>'
+    + '<p class="hint">自动：先试 LRCLIB，再试魔镜歌词，最后试 Mojim（mojim.org，需开 VPN）。</p>'
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">数据备份</span></div>'

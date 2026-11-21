@@ -248,6 +248,8 @@ input { font-family: inherit; }
 .order-search input { width: 100%; border: 1px solid transparent; background: #fff; border-radius: 12px; padding: 12px 14px; font-size: 14px; outline: none; box-shadow: var(--shadow); }
 .order-search input:focus { border-color: var(--accent); }
 .today-hint { color: var(--green); }
+.today-count { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 12px; }
+.edit-count { font-size: 12px; color: var(--accent); background: var(--accent-soft); font-weight: 600; padding: 4px 10px; border-radius: 999px; }
 .rand-song { background: #f7f8fc; border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 4px; }
 .rand-song .t { font-size: 18px; font-weight: 800; }
 .rand-song .a { font-size: 13px; color: var(--muted); margin-top: 4px; }
