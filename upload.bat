@@ -36,9 +36,12 @@ if "%REPO%"=="" (
 "%GIT%" remote add origin "%REPO%"
 
 echo.
-echo   Uploading... (first time you may be asked to sign in to GitHub)
+echo   IMPORTANT:
+echo   GitHub does NOT accept your account password.
+echo   When asked for a password, PASTE your Personal Access Token.
+echo   The token will NOT be visible while typing - that is normal.
 echo.
-"%GIT%" push -u origin main
+"%GIT%" -c credential.helper= push -u origin main
 
 if %errorlevel%==0 (
   echo.
