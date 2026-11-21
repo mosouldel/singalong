@@ -6,6 +6,8 @@ if errorlevel 1 set "GIT=E:\Git\cmd\git.exe"
 
 cd /d "%~dp0"
 
+"%GIT%" config --global --add safe.directory "%CD%" >nul 2>nul
+
 echo.
 echo ================================================
 echo   Singalong - Upload to GitHub (build APK online)
