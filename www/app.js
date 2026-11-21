@@ -537,7 +537,8 @@ async function neteaseLyrics(song) {
 
 /* ================= 搜索与歌词编排 ================= */
 async function search(q) {
-  const sources = settings.source === "auto" ? ["lrclib", "netease"] : [settings.source];
+  const preferred = settings.source === "auto" ? ["lrclib", "netease"] : [settings.source];
+  const sources = preferred.concat(["lrclib", "netease"].filter(function (src) { return preferred.indexOf(src) < 0; }));
   let lastErr = null;
   let sawEmpty = false;
   for (const src of sources) {
