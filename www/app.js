@@ -912,8 +912,8 @@ function renderSettings() {
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">数据备份</span></div>'
-    + '<div class="setting-row"><span class="k">导出曲库</span><button class="add-btn" id="exportBtn" type="button">导出</button></div>'
-    + '<div class="setting-row"><span class="k">导入曲库</span><button class="add-btn" id="importBtn" type="button">导入</button></div>'
+    + '<div class="setting-row"><span class="k">导出备份</span><button class="add-btn" id="exportBtn" type="button">导出</button></div>'
+    + '<div class="setting-row"><span class="k">导入备份</span><button class="add-btn" id="importBtn" type="button">导入</button></div>'
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">清空全部数据</span><button class="danger-btn" id="clearAllBtn" type="button">清空</button></div>'
@@ -1101,12 +1101,15 @@ async function onLoadLyrics() {
 /* ================= 数据导入导出 ================= */
 function getNativePlugin(name) {
   try {
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins[name]) return window.Capacitor.Plugins[name];
+  } catch (e) {}
+  try {
     if (window.Capacitor && window.Capacitor.registerPlugin) return window.Capacitor.registerPlugin(name);
   } catch (e) {}
   return null;
 }
 function exportPayload() {
-  return JSON.stringify({ app: "singalong", version: 1, exportedAt: new Date().toISOString(), songs: library }, null, 2);
+  return JSON.stringify({ app: "singalong", version: 2, exportedAt: new Date().toISOString(), songs: library, requests: requests }, null, 2);
 }
 function downloadBlob(name, payload) {
   const blob = new Blob([payload], { type: "application/json" });
@@ -1120,11 +1123,15 @@ async function exportData() {
   const name = "singalong-backup-" + new Date().toISOString().slice(0, 10) + ".json";
   const payload = exportPayload();
   if (isNative()) {
+    try {
+      await shareFile(name, payload);
+      return;
+    } catch (e) {}
     const Filesystem = getNativePlugin("Filesystem");
     const Share = getNativePlugin("Share");
     if (Filesystem && Share) {
       try {
-        const res = await Filesystem.writeFile({ path: name, data: payload, directory: "DOCUMENTS", encoding: "UTF8", recursive: true });
+        const res = await Filesystem.writeFile({ path: name, data: payload, directory: "CACHE", encoding: "UTF8", recursive: true });
         await Share.share({ title: "我会唱 数据备份", text: "Singalong 曲库备份", url: res.uri, dialogTitle: "导出曲库" });
         return;
       } catch (e) {
@@ -1132,9 +1139,22 @@ async function exportData() {
         return;
       }
     }
+    toast("导出失败：系统分享不可用");
+    return;
   }
   downloadBlob(name, payload);
   toast("已导出");
+}
+function shareFile(name, payload) {
+  return new Promise(function (resolve, reject) {
+    if (!navigator.share) { reject(new Error("无系统分享")); return; }
+    try {
+      const file = new File([payload], name, { type: "application/json" });
+      const data = { title: "我会唱 数据备份", text: "Singalong 曲库备份", files: [file] };
+      if (navigator.canShare && !navigator.canShare(data)) { reject(new Error("系统不支持分享文件")); return; }
+      navigator.share(data).then(function () { resolve(true); }, reject);
+    } catch (e) { reject(e); }
+  });
 }
 function importData(file) {
   const reader = new FileReader();
@@ -1149,8 +1169,27 @@ function importData(file) {
           library.push(normalizeImported(raw)); added++;
         }
       }
-      saveLibrary(); render();
-      toast("导入完成，新增 " + added + " 首");
+      let addedRequests = 0;
+      if (Array.isArray(data.requests)) {
+        const have = new Set(requests.map(function (r) { return r.id; }));
+        for (const raw of data.requests) {
+          if (!raw) continue;
+          const id = raw.id || uid();
+          if (have.has(id)) continue;
+          have.add(id);
+          requests.push({
+            id: id,
+            key: raw.key || (((raw.title || "") + "||" + (raw.artist || "")).toLowerCase()),
+            title: raw.title || "",
+            artist: raw.artist || "未知歌手",
+            dateKey: raw.dateKey || (raw.createdAt ? dateKeyOf(new Date(raw.createdAt)) : todayKey()),
+            createdAt: raw.createdAt || Date.now(),
+          });
+          addedRequests++;
+        }
+      }
+      saveLibrary(); saveRequests(); render();
+      toast("导入完成：新增 " + added + " 首，恢复 " + addedRequests + " 条点歌记录");
     } catch (e) { toast("导入失败：" + (e && e.message ? e.message : e)); }
   };
   reader.readAsText(file);
