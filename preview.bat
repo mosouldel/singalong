@@ -12,6 +12,8 @@ if errorlevel 1 (
 set "NODE_OPTIONS=--dns-result-order=ipv4first"
 
 echo Starting local preview at http://localhost:8787
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8787 ^| findstr LISTENING') do taskkill /PID %%a /F >nul 2>nul
+timeout /t 1 /nobreak >nul
 start "" /min cmd /c "node server.js"
 timeout /t 1 /nobreak >nul
 start "" http://localhost:8787

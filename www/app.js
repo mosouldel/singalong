@@ -517,8 +517,8 @@ async function loadLyricsForSong(song) {
     try {
       const lines = await loadLyricsBySource(src, song);
       if (lines && lines.length) return { lines: lines, source: srcLabel(src) };
-      lastErr = new Error("没有歌词");
-    } catch (e) { lastErr = e; }
+      lastErr = new Error("[" + srcLabel(src) + "] 没有歌词");
+    } catch (e) { lastErr = new Error("[" + srcLabel(src) + "] " + (e && e.message ? e.message : e)); }
   }
   throw lastErr || new Error("歌词加载失败");
 }
