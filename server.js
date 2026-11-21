@@ -1,5 +1,6 @@
 /* 我会唱 - 本地预览服务器（开发用，可选） */
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { URL } = require("url");
@@ -24,6 +25,40 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function rawRequest(target, method, headers, body, redirectCount) {
+  return new Promise(function (resolve, reject) {
+    let u;
+    try { u = new URL(target); } catch (e) { reject(e); return; }
+    const lib = u.protocol === "https:" ? https : http;
+    const req = lib.request({
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port || (u.protocol === "https:" ? 443 : 80),
+      path: u.pathname + u.search,
+      method: method,
+      headers: headers,
+      family: 4,
+    }, function (upstream) {
+      const chunks = [];
+      upstream.on("data", function (c) { chunks.push(c); });
+      upstream.on("end", function () {
+        const status = upstream.statusCode || 502;
+        const location = upstream.headers.location;
+        if (status >= 300 && status < 400 && location && (redirectCount || 0) < 5) {
+          try {
+            resolve(rawRequest(new URL(location, u).href, "GET", headers, "", (redirectCount || 0) + 1));
+          } catch (e) { reject(e); }
+          return;
+        }
+        resolve({ status: status, headers: upstream.headers, text: Buffer.concat(chunks).toString("utf8") });
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 async function handleProxy(req, res, reqUrl) {
   let target, method = "GET", body = "";
   if (req.method === "POST") {
@@ -39,19 +74,19 @@ async function handleProxy(req, res, reqUrl) {
     "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Accept": "*/*",
+    "Accept-Encoding": "identity",
   };
   if (target.indexOf("music.163.com") >= 0) {
     headers["Referer"] = "https://music.163.com/";
     headers["Cookie"] = "appver=1.5.2";
   }
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
-  const upstream = await fetch(target, { method, headers, body: method === "POST" ? body : undefined, redirect: "follow" });
-  const text = await upstream.text();
+  const upstream = await rawRequest(target, method, headers, method === "POST" ? body : "", 0);
   res.writeHead(upstream.status, {
-    "Content-Type": (upstream.headers.get("content-type") || "text/plain; charset=utf-8"),
+    "Content-Type": (upstream.headers["content-type"] || "text/plain; charset=utf-8"),
     "Access-Control-Allow-Origin": "*",
   });
-  res.end(text);
+  res.end(upstream.text);
 }
 
 function serveStatic(pathname, res) {
@@ -70,7 +105,7 @@ function serveStatic(pathname, res) {
 const server = http.createServer(function (req, res) {
   let reqUrl;
   try { reqUrl = new URL(req.url, "http://localhost"); } catch (e) { res.writeHead(400); res.end("bad request"); return; }
-  if (reqUrl.pathname === "/proxy") { handleProxy(req, res, reqUrl).catch(function (e) { res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" }); res.end("Proxy error: " + e.message); }); return; }
+  if (reqUrl.pathname === "/proxy") { handleProxy(req, res, reqUrl).catch(function (e) { res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" }); res.end("Proxy error: " + e.message + (e.code ? " (" + e.code + ")" : "")); }); return; }
   serveStatic(reqUrl.pathname, res);
 });
 
