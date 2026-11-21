@@ -158,7 +158,7 @@ async function fetchText(url, opts) {
     }
     const p = new URL("/proxy", location.origin);
     p.searchParams.set("url", url);
-    return webFetch(p.toString());
+    return webFetch(p.toString(), opts);
   }
   return webFetch(url, opts);
 }
@@ -418,7 +418,7 @@ async function mojimLyrics(song) {
 
 /* ================= 搜索与歌词编排 ================= */
 async function search(q) {
-  const sources = settings.source === "auto" ? ["lrclib", "mojigeci", "mojim"] : [settings.source];
+  const sources = settings.source === "auto" ? ["lrclib", "mojim", "mojigeci"] : [settings.source];
   let lastErr = null;
   let sawEmpty = false;
   for (const src of sources) {
@@ -460,7 +460,7 @@ async function loadMoreResults() {
 }
 async function loadLyricsForSong(song) {
   let lastErr = null;
-  const order = ["lrclib", "mojigeci", "mojim"].filter(function (src) {
+  const order = ["lrclib", "mojim", "mojigeci"].filter(function (src) {
     if (src === "lrclib" && !song.lrclibId) return false;
     return true;
   });
@@ -961,7 +961,7 @@ function renderSettings() {
     '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">歌词来源</span></div>'
     + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("mojigeci", "魔镜") + seg("mojim", "Mojim") + '</div></div>'
-    + '<p class="hint">自动：先试 LRCLIB，再试魔镜歌词，最后试 Mojim（mojim.org，需开 VPN）。</p>'
+    + '<p class="hint">自动：先试 LRCLIB（最稳），再试 Mojim（mojim.org，需开 VPN），最后试魔镜歌词。</p>'
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">数据备份</span></div>'
