@@ -37,6 +37,7 @@ if "%TOKEN%"=="" (
 
 echo.
 echo   Uploading...
+set "GIT_TERMINAL_PROMPT=0"
 "%GIT%" -c credential.helper= push "https://mosouldel:%TOKEN%@github.com/mosouldel/singalong.git" main
 
 if %errorlevel%==0 (
