@@ -1099,13 +1099,42 @@ async function onLoadLyrics() {
 }
 
 /* ================= 数据导入导出 ================= */
-function exportData() {
-  const blob = new Blob([JSON.stringify({ app: "singalong", version: 1, exportedAt: new Date().toISOString(), songs: library }, null, 2)], { type: "application/json" });
+function getNativePlugin(name) {
+  try {
+    if (window.Capacitor && window.Capacitor.registerPlugin) return window.Capacitor.registerPlugin(name);
+  } catch (e) {}
+  return null;
+}
+function exportPayload() {
+  return JSON.stringify({ app: "singalong", version: 1, exportedAt: new Date().toISOString(), songs: library }, null, 2);
+}
+function downloadBlob(name, payload) {
+  const blob = new Blob([payload], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "singalong-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
+}
+async function exportData() {
+  const name = "singalong-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  const payload = exportPayload();
+  if (isNative()) {
+    const Filesystem = getNativePlugin("Filesystem");
+    const Share = getNativePlugin("Share");
+    if (Filesystem && Share) {
+      try {
+        const res = await Filesystem.writeFile({ path: name, data: payload, directory: "DOCUMENTS", encoding: "UTF8", recursive: true });
+        await Share.share({ title: "我会唱 数据备份", text: "Singalong 曲库备份", url: res.uri, dialogTitle: "导出曲库" });
+        return;
+      } catch (e) {
+        toast("导出失败：" + (e && e.message ? e.message : e));
+        return;
+      }
+    }
+  }
+  downloadBlob(name, payload);
+  toast("已导出");
 }
 function importData(file) {
   const reader = new FileReader();
