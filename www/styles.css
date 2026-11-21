@@ -259,4 +259,4 @@ input { font-family: inherit; }
 .hist-row .song-main { flex: 1; min-width: 0; }
 .hist-del { font-size: 12px; color: var(--danger); font-weight: 600; padding: 6px 8px; }
 .toast { display: flex; align-items: center; justify-content: center; gap: 10px; }
-#toastAction { background: none; color: #b8c4ff; font-weight: 700; font-size: 13px; padding: 0; }
+

@@ -54,15 +54,6 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, 2400);
 }
-function toastWithAction(msg, label, fn, duration) {
-  const t = $("#toast");
-  t.innerHTML = '<span>' + esc(msg) + '</span><button id="toastAction" type="button">' + esc(label) + '</button>';
-  t.classList.add("show");
-  clearTimeout(toastTimer);
-  const btn = $("#toastAction");
-  if (btn) btn.onclick = function () { hideToast(); if (fn) fn(); };
-  toastTimer = setTimeout(hideToast, duration || 4000);
-}
 
 function htmlToText(html) {
   let s = String(html == null ? "" : html)
@@ -441,18 +432,50 @@ function makeRequest(song) {
 }
 function orderSong(song) {
   if (!song) return;
-  const rec = makeRequest(song);
-  requests.push(rec);
+  requests.push(makeRequest(song));
   saveRequests();
   render();
-  toastWithAction("已点歌「" + song.title + "」", "撤销", function () {
-    requests = requests.filter(function (r) { return r.id !== rec.id; });
-    saveRequests(); render(); toast("已撤销点歌");
-  });
+  toast("已点歌「" + song.title + "」");
 }
 function orderSongById(id) {
   const s = getSong(id); if (!s) return;
   orderSong(s);
+}
+function openEditCountModal(songId) {
+  const s = getSong(songId); if (!s) return;
+  const n = todayCount(songKey(s));
+  $("#modalCard").innerHTML =
+    '<h3>编辑今日点歌次数</h3>'
+    + '<p class="ml">' + esc(s.title) + ' · ' + esc(s.artist) + '</p>'
+    + '<div class="form"><label>今日点歌次数</label><input id="ecInput" type="number" min="0" max="99" inputmode="numeric" value="' + n + '"></div>'
+    + '<div class="modal-actions"><button class="btn-cancel" id="ecCancel" type="button">取消</button>'
+    + '<button class="btn-primary" id="ecSave" type="button">保存</button></div>';
+  showModal();
+  $("#ecCancel").onclick = closeModal;
+  $("#ecSave").onclick = function () {
+    let target = parseInt($("#ecInput").value, 10);
+    if (isNaN(target)) target = 0;
+    target = Math.max(0, Math.min(99, target));
+    closeModal();
+    editTodayCount(s, target);
+  };
+}
+function editTodayCount(song, target) {
+  const key = songKey(song);
+  const tk = todayKey();
+  const todayRecs = requests.filter(function (r) { return r.key === key && r.dateKey === tk; });
+  const current = todayRecs.length;
+  if (target === current) return;
+  if (target > current) {
+    for (let i = 0; i < target - current; i++) requests.push(makeRequest(song));
+  } else {
+    const sorted = todayRecs.slice().sort(function (a, b) { return b.createdAt - a.createdAt; });
+    const removeIds = new Set(sorted.slice(0, current - target).map(function (r) { return r.id; }));
+    requests = requests.filter(function (r) { return !removeIds.has(r.id); });
+  }
+  saveRequests();
+  render();
+  toast("今日点歌次数已设为 " + target);
 }
 let skipConfirmSession = false;
 function openConfirmWithSkip(title, msg, okText, danger, onOk) {
@@ -714,7 +737,7 @@ function orderListHtml() {
 }
 function orderRowHtml(s) {
   const n = todayCount(songKey(s));
-  const hint = n ? '<div class="song-sub today-hint">今日已点 ' + n + ' 次</div>' : '';
+  const hint = n ? '<div class="today-count"><span class="today-hint">今日已点 ' + n + ' 次</span><button class="edit-count" data-action="edit-count" data-id="' + esc(s.id) + '" type="button">编辑次数</button></div>' : '';
   return '<div class="song-row">'
     + '<div class="song-main"><div class="song-title">' + esc(s.title) + '</div><div class="song-sub">' + esc(s.artist) + '</div>' + hint + '</div>'
     + '<button class="add-btn" data-action="order" data-id="' + esc(s.id) + '" type="button">点歌</button>'
@@ -1057,6 +1080,8 @@ function bindEvents() {
     if (od) { openDetail(od.dataset.id); return; }
     const ord = e.target.closest("[data-action='order']");
     if (ord) { orderSongById(ord.dataset.id); return; }
+    const ec = e.target.closest("[data-action='edit-count']");
+    if (ec) { openEditCountModal(ec.dataset.id); return; }
     const rnd = e.target.closest("[data-action='random-order']");
     if (rnd) { openRandomOrder(); return; }
     const oh = e.target.closest("[data-action='open-order-history']");
