@@ -82,10 +82,11 @@ async function handleProxy(req, res, reqUrl) {
   }
   if (target.indexOf("c.y.qq.com") >= 0 || target.indexOf("y.qq.com") >= 0) {
     headers["Referer"] = "https://y.qq.com/portal/player.html";
+    headers["Accept-Encoding"] = "identity";
   }
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
   let upstream;
-  if (target.indexOf("music.163.com") >= 0) {
+  if (target.indexOf("music.163.com") >= 0 || target.indexOf("c.y.qq.com") >= 0 || target.indexOf("y.qq.com") >= 0) {
     upstream = await rawRequest(target, method, headers, method === "POST" ? body : "", 0);
   } else {
     const r = await fetch(target, { method, headers, body: method === "POST" ? body : undefined, redirect: "follow" });
