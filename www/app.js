@@ -193,7 +193,7 @@ async function fetchText(url, opts) {
     }
     const p = new URL("/proxy", location.origin);
     p.searchParams.set("url", url);
-    return webFetch(p.toString(), opts);
+    return webFetch(p.toString());
   }
   return webFetch(url, opts);
 }
@@ -565,13 +565,31 @@ async function qqSearch(q) {
   }).filter(function (s) { return s.title; });
 }
 async function qqLyrics(song) {
+  function decodeQqBase64(s) {
+    try {
+      const bin = atob(String(s).replace(/\s+/g, ""));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder("utf-8").decode(bytes);
+    } catch (e) { return String(s); }
+  }
   async function fetchByMid(mid) {
-    const url = QQ + "/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=" + encodeURIComponent(mid)
-      + "&g_tk=5381&format=json&nobase64=1&inCharset=utf8&outCharset=utf-8&platform=yqq.json";
-    const text = await fetchText(url, { headers: { Accept: "application/json", Referer: "https://y.qq.com/portal/player.html", "User-Agent": UA } });
-    let data;
-    try { data = JSON.parse(text); } catch (e) { data = {}; }
-    return parseLrc(data.lyric || "");
+    let lastCode = null, lastErr = null;
+    for (const nobase64 of ["1", "0"]) {
+      try {
+        const url = QQ + "/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=" + encodeURIComponent(mid)
+          + "&g_tk=5381&format=json&nobase64=" + nobase64 + "&inCharset=utf8&outCharset=utf-8&platform=yqq.json";
+        const text = await fetchText(url, { headers: { Accept: "application/json", Referer: "https://y.qq.com/portal/player.html", "User-Agent": UA } });
+        let data;
+        try { data = JSON.parse(text); } catch (e) { data = {}; }
+        lastCode = data.retcode != null ? data.retcode : data.code;
+        let raw = data.lyric || "";
+        if (nobase64 === "0" && raw) raw = decodeQqBase64(raw);
+        const lines = parseLrc(raw);
+        if (lines && lines.length) return lines;
+      } catch (e) { lastErr = e; }
+    }
+    throw new Error("QQ音乐没有歌词（mid=" + mid + "，code=" + lastCode + (lastErr ? "，" + (lastErr && lastErr.message ? lastErr.message : lastErr) : "") + "）");
   }
   if (song.qqSongMid) {
     try {
