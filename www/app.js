@@ -202,12 +202,14 @@ async function lrclibSearch(q) {
     LRCLIB + "/api/search?q=" + encodeURIComponent(q),
   ];
   let lastErr = null;
+  let sawArray = false;
   for (const url of urls) {
     try {
       const text = await fetchText(url, { headers: { Accept: "application/json" } });
       const data = JSON.parse(text);
       if (!Array.isArray(data)) continue;
-      return data.map(function (it) {
+      sawArray = true;
+      const items = data.map(function (it) {
         return {
           id: "lrclib:" + it.id,
           title: it.trackName || it.name || "",
@@ -221,8 +223,10 @@ async function lrclibSearch(q) {
           duration: it.duration || 0,
         };
       }).filter(function (s) { return s.title; });
+      if (items.length) return items;
     } catch (e) { lastErr = e; }
   }
+  if (sawArray) return [];
   throw lastErr || new Error("LRCLIB 搜索失败");
 }
 async function lrclibLyrics(song) {
