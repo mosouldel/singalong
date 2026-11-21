@@ -674,8 +674,8 @@ async function loadLyricsForSong(song) {
 }
 async function loadLyricsBySource(src, song) {
   if (src === "lrclib") return lrclibLyrics(song);
-  if (src === "qq") return qqLyrics(song);
-  if (src === "netease") return neteaseLyrics(song);
+  if (src === "qq") return (await qqLyrics(song)).lines;
+  if (src === "netease") return (await neteaseLyrics(song)).lines;
   if (src === "mojim") {
     const res = await mojimLyrics(song);
     if (res.artist && (!song.artist || song.artist === "未知歌手")) song.artist = res.artist;
