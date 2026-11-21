@@ -74,14 +74,20 @@ async function handleProxy(req, res, reqUrl) {
     "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Accept": "*/*",
-    "Accept-Encoding": "identity",
   };
   if (target.indexOf("music.163.com") >= 0) {
     headers["Referer"] = "https://music.163.com/";
     headers["Cookie"] = "appver=1.5.2";
+    headers["Accept-Encoding"] = "identity";
   }
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
-  const upstream = await rawRequest(target, method, headers, method === "POST" ? body : "", 0);
+  let upstream;
+  if (target.indexOf("music.163.com") >= 0) {
+    upstream = await rawRequest(target, method, headers, method === "POST" ? body : "", 0);
+  } else {
+    const r = await fetch(target, { method, headers, body: method === "POST" ? body : undefined, redirect: "follow" });
+    upstream = { status: r.status, headers: Object.fromEntries(r.headers.entries()), text: await r.text() };
+  }
   res.writeHead(upstream.status, {
     "Content-Type": (upstream.headers["content-type"] || "text/plain; charset=utf-8"),
     "Access-Control-Allow-Origin": "*",
