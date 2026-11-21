@@ -3,6 +3,7 @@
 /* ================= 常量与状态 ================= */
 const STORAGE_KEY = "singalong.library.v1";
 const SETTINGS_KEY = "singalong.settings.v1";
+const REQUESTS_KEY = "singalong.requests.v1";
 const LRCLIB = "https://lrclib.net/api";
 const MOJIGECI = "https://mojigeci.com/zh-Hans";
 const UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
@@ -17,9 +18,11 @@ const state = {
   error: "",
   detailId: null,
   lyricsLoading: false,
+  orderQuery: "",
 };
 
 let library = [];
+let requests = [];
 let settings = { source: "auto" };
 
 /* ================= 工具 ================= */
@@ -38,12 +41,27 @@ function getSong(id) { return library.find(function (s) { return s.id === id; })
 function srcLabel(src) { return src === "lrclib" ? "LRCLIB" : "魔镜歌词"; }
 
 let toastTimer = null;
+function hideToast() {
+  const t = $("#toast");
+  t.classList.remove("show");
+  t.innerHTML = "";
+}
 function toast(msg) {
   const t = $("#toast");
+  t.innerHTML = "";
   t.textContent = msg;
   t.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(function () { t.classList.remove("show"); }, 2400);
+  toastTimer = setTimeout(hideToast, 2400);
+}
+function toastWithAction(msg, label, fn, duration) {
+  const t = $("#toast");
+  t.innerHTML = '<span>' + esc(msg) + '</span><button id="toastAction" type="button">' + esc(label) + '</button>';
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  const btn = $("#toastAction");
+  if (btn) btn.onclick = function () { hideToast(); if (fn) fn(); };
+  toastTimer = setTimeout(hideToast, duration || 4000);
 }
 
 function htmlToText(html) {
@@ -76,6 +94,16 @@ function loadSettings() {
 }
 function saveSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+function loadRequests() {
+  try {
+    const raw = localStorage.getItem(REQUESTS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    requests = Array.isArray(arr) ? arr : [];
+  } catch (e) { requests = []; }
+}
+function saveRequests() {
+  try { localStorage.setItem(REQUESTS_KEY, JSON.stringify(requests)); } catch (e) { toast("本地存储失败"); }
 }
 
 /* ================= 网络层（原生 App / 本地代理 / 直连） ================= */
@@ -382,6 +410,145 @@ function normalizeImported(raw) {
     notes: raw.notes && typeof raw.notes === "object" ? raw.notes : {},
   };
 }
+/* ================= 点歌（点歌记录） ================= */
+function pad2(n) { return (n < 10 ? "0" : "") + n; }
+function dateKeyOf(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+function todayKey() { return dateKeyOf(new Date()); }
+function fmtDateKey(k) {
+  const parts = String(k).split("-");
+  if (parts.length !== 3) return String(k);
+  return parts[0] + "年" + Number(parts[1]) + "月" + Number(parts[2]) + "日";
+}
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+function todayCount(key) {
+  const tk = todayKey();
+  return requests.filter(function (r) { return r.key === key && r.dateKey === tk; }).length;
+}
+function isOrderedToday(key) { return todayCount(key) > 0; }
+function makeRequest(song) {
+  const d = new Date();
+  return {
+    id: uid(),
+    key: songKey(song),
+    title: song.title,
+    artist: song.artist || "未知歌手",
+    dateKey: dateKeyOf(d),
+    createdAt: d.getTime(),
+  };
+}
+function orderSong(song) {
+  if (!song) return;
+  const rec = makeRequest(song);
+  requests.push(rec);
+  saveRequests();
+  render();
+  toastWithAction("已点歌「" + song.title + "」", "撤销", function () {
+    requests = requests.filter(function (r) { return r.id !== rec.id; });
+    saveRequests(); render(); toast("已撤销点歌");
+  });
+}
+function orderSongById(id) {
+  const s = getSong(id); if (!s) return;
+  orderSong(s);
+}
+let skipConfirmSession = false;
+function openConfirmWithSkip(title, msg, okText, danger, onOk) {
+  if (skipConfirmSession) { onOk && onOk(); return; }
+  $("#modalCard").innerHTML =
+    '<h3>' + esc(title) + '</h3>'
+    + '<p class="ml">' + esc(msg) + '</p>'
+    + '<label class="check-row"><input type="checkbox" id="cfSkip"><span>本次打开 App 不再提醒</span></label>'
+    + '<div class="modal-actions"><button class="btn-cancel" id="cfCancel" type="button">取消</button>'
+    + '<button class="' + (danger ? "btn-danger" : "btn-primary") + '" id="cfOk" type="button">' + esc(okText) + '</button></div>';
+  showModal();
+  $("#cfCancel").onclick = closeModal;
+  $("#cfOk").onclick = function () {
+    const skip = $("#cfSkip") && $("#cfSkip").checked;
+    closeModal();
+    if (skip) skipConfirmSession = true;
+    onOk && onOk();
+  };
+}
+function eligibleRandomSongs() {
+  return library.filter(function (s) { return !isOrderedToday(songKey(s)); });
+}
+let randomCandidate = null;
+function pickRandom() {
+  const eligible = eligibleRandomSongs();
+  if (!eligible.length) { closeModal(); toast("今天能点的歌都点过啦"); return; }
+  randomCandidate = eligible[Math.floor(Math.random() * eligible.length)];
+  $("#modalCard").innerHTML =
+    '<h3>随机点歌</h3>'
+    + '<p class="ml">今天还没点过，就唱这首吧：</p>'
+    + '<div class="rand-song"><div class="t">' + esc(randomCandidate.title) + '</div><div class="a">' + esc(randomCandidate.artist) + '</div></div>'
+    + '<div class="modal-actions"><button class="btn-cancel" id="randAgain" type="button">重新随机</button>'
+    + '<button class="btn-primary" id="randOk" type="button">点这首</button></div>';
+  showModal();
+  $("#randAgain").onclick = pickRandom;
+  $("#randOk").onclick = function () { const s = randomCandidate; closeModal(); orderSong(s); };
+}
+function openRandomOrder() {
+  if (!library.length) { toast("曲库还是空的，先去收录几首歌"); return; }
+  if (!eligibleRandomSongs().length) { toast("今天能点的歌都点过啦"); return; }
+  pickRandom();
+}
+function orderHistoryGroups() {
+  const tk = todayKey();
+  const past = requests.filter(function (r) { return r.dateKey !== tk; });
+  const map = new Map();
+  for (const r of past) {
+    if (!map.has(r.dateKey)) map.set(r.dateKey, []);
+    map.get(r.dateKey).push(r);
+  }
+  const keys = Array.from(map.keys()).sort().reverse();
+  return keys.map(function (k) {
+    return { dateKey: k, records: map.get(k).sort(function (a, b) { return b.createdAt - a.createdAt; }) };
+  });
+}
+function openOrderHistory() {
+  renderOrderHistory();
+  $("#orderHistoryOverlay").hidden = false;
+}
+function renderOrderHistory() {
+  const groups = orderHistoryGroups();
+  if (!groups.length) {
+    $("#orderHistoryBody").innerHTML = '<div class="empty"><div class="big">🕘</div><p class="t">还没有历史点歌</p><p class="d">点过的歌会按日期汇总在这里。</p></div>';
+    return;
+  }
+  let html = '<p class="hint" style="margin:0 0 10px">仅显示今天以前的点歌记录。</p>';
+  for (const g of groups) {
+    html += '<div class="hist-group">'
+      + '<div class="hist-head"><span>' + esc(fmtDateKey(g.dateKey)) + ' · ' + g.records.length + ' 条</span>'
+      + '<button class="hist-del" data-action="order-history-remove-day" data-date="' + esc(g.dateKey) + '" type="button">删除当日</button></div>'
+      + g.records.map(function (r) {
+          return '<div class="hist-row">'
+            + '<div class="song-main"><div class="song-title">' + esc(r.title) + '</div><div class="song-sub">' + esc(r.artist) + ' · ' + fmtTime(r.createdAt) + '</div></div>'
+            + '<button class="hist-del" data-action="order-history-remove" data-id="' + esc(r.id) + '" type="button">删除</button>'
+            + '</div>';
+        }).join("")
+      + '</div>';
+  }
+  $("#orderHistoryBody").innerHTML = html;
+}
+function confirmRemoveRequest(id) {
+  const r = requests.find(function (x) { return x.id === id; });
+  if (!r) return;
+  openConfirmWithSkip("删除点歌记录", "确定删除「" + r.title + " · " + r.artist + "」这条点歌记录吗？", "删除", true, function () {
+    requests = requests.filter(function (x) { return x.id !== id; });
+    saveRequests(); renderOrderHistory(); render();
+  });
+}
+function confirmRemoveRequestDay(dateKey) {
+  const n = requests.filter(function (x) { return x.dateKey === dateKey; }).length;
+  openConfirmWithSkip("删除当日点歌", "确定删除 " + fmtDateKey(dateKey) + " 的全部 " + n + " 条点歌记录吗？", "删除", true, function () {
+    requests = requests.filter(function (x) { return x.dateKey !== dateKey; });
+    saveRequests(); renderOrderHistory(); render();
+  });
+}
+
 /* ================= 渲染：主视图 ================= */
 function render() {
   $("#clearBtn").hidden = !$("#searchInput").value;
@@ -398,11 +565,20 @@ function renderMain() {
   const main = $("#main");
   if (state.mode === "library") main.innerHTML = renderLibrary();
   else if (state.mode === "search") main.innerHTML = renderSearch();
+  else if (state.mode === "order") main.innerHTML = renderOrder();
   else main.innerHTML = renderStats();
   afterRenderMain();
 }
 function afterRenderMain() {
   if (state.mode === "library") $$(".swipe-row").forEach(attachRowGestures);
+  if (state.mode === "order") {
+    const inp = $("#orderSearchInput");
+    if (inp) inp.addEventListener("input", function () {
+      state.orderQuery = this.value;
+      const listEl = $("#orderList");
+      if (listEl) listEl.innerHTML = orderListHtml();
+    });
+  }
 }
 
 function renderLibrary() {
@@ -480,7 +656,7 @@ function countBy(fn) {
   return Array.from(m.entries()).map(function (e) { return { k: e[0], n: e[1] }; }).sort(function (a, b) { return b.n - a.n; });
 }
 function renderStats() {
-  if (!library.length) {
+  if (!library.length && !requests.length) {
     return '<div class="empty"><div class="big">📊</div><p class="t">还没有数据</p><p class="d">先收录几首歌，这里会显示统计。</p></div>';
   }
   const total = library.length;
@@ -502,6 +678,16 @@ function renderStats() {
   html += byArtist.slice(0, 15).map(function (x) {
     return '<div class="bar-row"><span class="bar-name">' + esc(x.k) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + Math.round(x.n / maxArtist * 100) + '%"></div></div><span class="bar-num">' + x.n + '</span></div>';
   }).join("");
+  const sung = sungCountList();
+  html += '<div class="section-label">唱过次数（累计点歌 ' + requests.length + ' 次）</div>';
+  if (!sung.length) {
+    html += '<p class="hint" style="margin:0 4px 12px">还没有点歌记录，去「点歌」页签点一首吧。</p>';
+  } else {
+    const maxSung = Math.max.apply(null, sung.map(function (x) { return x.n; }));
+    html += sung.slice(0, 15).map(function (x) {
+      return '<div class="bar-row"><span class="bar-name">' + esc(x.title) + '</span><div class="bar-track"><div class="bar-fill" style="width:' + Math.round(x.n / Math.max(1, maxSung) * 100) + '%"></div></div><span class="bar-num">' + x.n + '</span></div>';
+    }).join("");
+  }
   html += '<div class="section-label">最近收录</div>';
   html += recent.map(function (s) {
     const badge = s.tag === "会唱" ? "tag-can" : "tag-want";
@@ -510,6 +696,39 @@ function renderStats() {
   }).join("");
   return html;
 }
+function renderOrder() {
+  return '<div class="order-toolbar">'
+    + '<button class="order-btn primary" data-action="random-order" type="button">🎲 随机点歌</button>'
+    + '<button class="order-btn" data-action="open-order-history" type="button">🕘 点歌历史</button>'
+    + '</div>'
+    + '<div class="order-search"><input id="orderSearchInput" type="search" placeholder="搜已收录的歌" autocomplete="off" value="' + esc(state.orderQuery || "") + '"></div>'
+    + '<div id="orderList">' + orderListHtml() + '</div>';
+}
+function orderListHtml() {
+  const q = (state.orderQuery || "").trim().toLowerCase();
+  let list = library.slice().sort(byAddedDesc);
+  if (q) list = list.filter(function (s) { return (s.title || "").toLowerCase().indexOf(q) >= 0 || (s.artist || "").toLowerCase().indexOf(q) >= 0; });
+  if (!library.length) return '<div class="empty"><div class="big">🎤</div><p class="t">曲库还是空的</p><p class="d">先去「我的曲库」收录几首歌吧</p></div>';
+  if (!list.length) return '<div class="empty"><div class="big">🔍</div><p class="t">没找到已收录的歌</p><p class="d">换个关键词试试</p></div>';
+  return list.map(orderRowHtml).join("");
+}
+function orderRowHtml(s) {
+  const n = todayCount(songKey(s));
+  const hint = n ? '<div class="song-sub today-hint">今日已点 ' + n + ' 次</div>' : '';
+  return '<div class="song-row">'
+    + '<div class="song-main"><div class="song-title">' + esc(s.title) + '</div><div class="song-sub">' + esc(s.artist) + '</div>' + hint + '</div>'
+    + '<button class="add-btn" data-action="order" data-id="' + esc(s.id) + '" type="button">点歌</button>'
+    + '</div>';
+}
+function sungCountList() {
+  const m = new Map();
+  for (const r of requests) {
+    if (!m.has(r.key)) m.set(r.key, { title: r.title, artist: r.artist, n: 0 });
+    m.get(r.key).n++;
+  }
+  return Array.from(m.values()).sort(function (a, b) { return b.n - a.n; });
+}
+
 /* ================= 渲染：详情 ================= */
 function openDetail(id) { state.detailId = id; renderDetail(); }
 function closeDetail() { state.detailId = null; $("#detailOverlay").hidden = true; }
@@ -836,6 +1055,12 @@ function bindEvents() {
     if (manual) { openManualModal(); return; }
     const od = e.target.closest("[data-action='open-detail']");
     if (od) { openDetail(od.dataset.id); return; }
+    const ord = e.target.closest("[data-action='order']");
+    if (ord) { orderSongById(ord.dataset.id); return; }
+    const rnd = e.target.closest("[data-action='random-order']");
+    if (rnd) { openRandomOrder(); return; }
+    const oh = e.target.closest("[data-action='open-order-history']");
+    if (oh) { openOrderHistory(); return; }
   });
 
   $("#detailBack").addEventListener("click", closeDetail);
@@ -862,12 +1087,20 @@ function bindEvents() {
     }
   });
 
+  $("#orderHistoryBack").addEventListener("click", function () { $("#orderHistoryOverlay").hidden = true; });
+  $("#orderHistoryBody").addEventListener("click", function (e) {
+    const rm = e.target.closest("[data-action='order-history-remove']");
+    if (rm) { confirmRemoveRequest(rm.dataset.id); return; }
+    const rmd = e.target.closest("[data-action='order-history-remove-day']");
+    if (rmd) { confirmRemoveRequestDay(rmd.dataset.date); return; }
+  });
   $("#modalBackdrop").addEventListener("click", function (e) { if (e.target === $("#modalBackdrop")) closeModal(); });
 }
 
 /* ================= 初始化 ================= */
 function init() {
   loadLibrary();
+  loadRequests();
   loadSettings();
   const fileInput = document.createElement("input");
   fileInput.type = "file"; fileInput.accept = "application/json,.json"; fileInput.id = "importFile"; fileInput.hidden = true;

@@ -37,6 +37,7 @@
 
   <nav class="bottomnav">
     <button class="nav-item active" data-mode="library" type="button"><span class="nav-ico">🎵</span><span>我的曲库</span></button>
+    <button class="nav-item" data-mode="order" type="button"><span class="nav-ico">🎤</span><span>点歌</span></button>
     <button class="nav-item" data-mode="stats" type="button"><span class="nav-ico">📊</span><span>统计</span></button>
   </nav>
 </div>
@@ -60,6 +61,17 @@
       <span class="spacer"></span>
     </header>
     <div class="sheet-body" id="settingsBody"></div>
+  </div>
+</div>
+
+<div class="overlay" id="orderHistoryOverlay" hidden>
+  <div class="sheet">
+    <header class="sheet-header">
+      <button id="orderHistoryBack" class="back-btn" type="button">‹ 返回</button>
+      <div class="sheet-title">点歌历史</div>
+      <span class="spacer"></span>
+    </header>
+    <div class="sheet-body" id="orderHistoryBody"></div>
   </div>
 </div>
 
