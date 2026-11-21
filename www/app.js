@@ -111,7 +111,7 @@ function isBehindProxy() {
   return (h === "localhost" || h === "127.0.0.1") && (p === "8787" || p === "8765" || p === "3000" || p === "");
 }
 async function nativeHttp(url, opts) {
-  const CapHttp = window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+  const CapHttp = getNativePlugin("CapacitorHttp") || (window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp);
   if (!CapHttp) throw new Error("CapacitorHttp 不可用");
   const method = (opts.method || "GET").toUpperCase();
   const headers = Object.assign({ "User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8" }, opts.headers || {});
@@ -140,8 +140,9 @@ async function webFetch(url, opts) {
 async function fetchText(url, opts) {
   opts = opts || {};
   if (isNative()) {
-    if (url.indexOf(LRCLIB) === 0) {
-      // LRCLIB is CORS-enabled; use the WebView browser network stack so it works on 5G mobile data.
+    if (url.indexOf(LRCLIB) === 0 || url.indexOf(MOJIGECI) === 0) {
+      // LRCLIB is CORS-enabled; try the WebView browser network stack first on mobile.
+      // For mojigeci, also try WebView first, then fall back to the native HTTP bridge.
       try { return await webFetch(url, opts); }
       catch (e) { return await nativeHttp(url, opts); }
     }
@@ -230,17 +231,42 @@ async function discoverMojigeciSearch() {
   return mojigeciSearchCfg;
 }
 async function mojigeciSearch(q) {
-  const cfg = await discoverMojigeciSearch();
-  let html;
-  if (cfg.method === "post") {
-    html = await fetchText(cfg.url, { method: "POST", body: new URLSearchParams({ [cfg.param]: q }).toString(), contentType: "application/x-www-form-urlencoded" });
-  } else {
-    const sep = cfg.url.indexOf("?") >= 0 ? "&" : "?";
-    html = await fetchText(cfg.url + sep + cfg.param + "=" + encodeURIComponent(q));
+  const qq = encodeURIComponent(q);
+  const fetchers = [];
+  try {
+    const cfg = await discoverMojigeciSearch();
+    if (cfg.method === "post") {
+      fetchers.push(function () {
+        return fetchText(cfg.url, { method: "POST", body: new URLSearchParams({ [cfg.param]: q }).toString(), contentType: "application/x-www-form-urlencoded" });
+      });
+    } else {
+      const sep = cfg.url.indexOf("?") >= 0 ? "&" : "?";
+      fetchers.push(function () { return fetchText(cfg.url + sep + cfg.param + "=" + qq); });
+    }
+  } catch (e) {}
+  if (String(MOJIGECI + "/search").indexOf("/zh-Hans/search") >= 0) {
+    fetchers.push(function () { return fetchText("https://mojigeci.com/search?q=" + qq); });
   }
-  return parseMojigeciSearch(html);
+  fetchers.push(function () { return fetchText(MOJIGECI + "/artist/" + qq); });
+  fetchers.push(function () { return fetchText(MOJIGECI + "/lyrics/" + qq); });
+  const out = [];
+  const seen = new Set();
+  for (const getHtml of fetchers) {
+    try {
+      const html = await getHtml();
+      for (const it of parseMojigeciSearch(html, q)) {
+        const key = it.mojigeciUrl || it.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(it);
+      }
+    } catch (e) {}
+    if (out.length >= 40) break;
+  }
+  return out;
 }
-function parseMojigeciSearch(html) {
+function parseMojigeciSearch(html, mustContain) {
+  if (mustContain && htmlToText(html).indexOf(mustContain) < 0) return [];
   const out = [];
   const seen = new Set();
   const re = /<a\b[^>]*href=["']([^"']*\/lyrics\/[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
