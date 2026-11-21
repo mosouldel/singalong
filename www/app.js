@@ -198,8 +198,8 @@ async function fetchText(url, opts) {
 /* ================= 歌词源：LRCLIB ================= */
 async function lrclibSearch(q) {
   const urls = [
-    LRCLIB + "/api/v2/search?q=" + encodeURIComponent(q),
-    LRCLIB + "/api/search?q=" + encodeURIComponent(q),
+    LRCLIB + "/v2/search?q=" + encodeURIComponent(q),
+    LRCLIB + "/search?q=" + encodeURIComponent(q),
   ];
   let lastErr = null;
   let sawArray = false;
