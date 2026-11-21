@@ -575,7 +575,8 @@ function renderSettings() {
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">清空全部数据</span><button class="danger-btn" id="clearAllBtn" type="button">清空</button></div>'
     + '</div>'
-    + '<p class="hint">数据只保存在本机（浏览器/App 本地存储），不上传任何服务器。出门前建议先「导出」备份。</p>';
+    + '<p class="hint">数据只保存在本机（浏览器/App 本地存储），不上传任何服务器。出门前建议先「导出」备份。</p>'
+    + '<div class="signature">作者：Song</div>';
 }
 
 /* ================= 模态框 ================= */
