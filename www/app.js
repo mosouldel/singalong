@@ -8,6 +8,7 @@ const LRCLIB = "https://lrclib.net/api";
 const MOJIGECI = "https://mojigeci.com/zh-Hans";
 const MOJIM = "https://mojim.org";
 const NETEASE = "https://music.163.com";
+const QQ = "https://c.y.qq.com";
 const UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
 
 const state = {
@@ -43,6 +44,7 @@ function getSong(id) { return library.find(function (s) { return s.id === id; })
 function srcLabel(src) {
   if (src === "lrclib") return "LRCLIB";
   if (src === "netease") return "网易云";
+  if (src === "qq") return "QQ音乐";
   if (src === "mojim") return "Mojim";
   return "魔镜歌词";
 }
@@ -113,7 +115,7 @@ function loadSettings() {
     const r = JSON.parse(localStorage.getItem(SETTINGS_KEY));
     if (r && typeof r === "object") settings = Object.assign({ source: "auto" }, r);
   } catch (e) {}
-  if (settings.source === "mojigeci") settings.source = "auto";
+  if (settings.source === "mojigeci" || settings.source === "netease") settings.source = "auto";
 }
 function saveSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
@@ -539,10 +541,58 @@ async function neteaseLyrics(song) {
   return { lines: lines, artist: "" };
 }
 
+/* ================= 歌词源：QQ 音乐 ================= */
+async function qqSearch(q) {
+  const url = QQ + "/soso/fcgi-bin/client_search_cp?p=1&n=30&w=" + encodeURIComponent(q)
+    + "&format=json&platform=yqq.json&cr=1&newsong=1&t=0&aggr=1";
+  const text = await fetchText(url, { headers: { Accept: "application/json", Referer: "https://y.qq.com/portal/player.html", "User-Agent": UA } });
+  let data;
+  try { data = JSON.parse(text); } catch (e) { return []; }
+  const songs = data && data.data && data.data.song && Array.isArray(data.data.song.list) ? data.data.song.list : [];
+  return songs.map(function (it) {
+    const artists = Array.isArray(it.singer) ? it.singer.map(function (s) { return s && s.name; }).filter(Boolean) : [];
+    return {
+      id: "qq:" + (it.songmid || it.songid || ""),
+      title: it.songname || "",
+      artist: artists.join("/") || "未知歌手",
+      album: it.albumname || "",
+      lyricist: "", composer: "",
+      source: "QQ音乐",
+      qqSongMid: it.songmid || "",
+      qqSongId: it.songid || "",
+      duration: Math.round(it.interval || 0) || 0,
+    };
+  }).filter(function (s) { return s.title; });
+}
+async function qqLyrics(song) {
+  async function fetchByMid(mid) {
+    const url = QQ + "/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=" + encodeURIComponent(mid)
+      + "&g_tk=5381&format=json&nobase64=1&inCharset=utf8&outCharset=utf-8&platform=yqq.json";
+    const text = await fetchText(url, { headers: { Accept: "application/json", Referer: "https://y.qq.com/portal/player.html", "User-Agent": UA } });
+    let data;
+    try { data = JSON.parse(text); } catch (e) { data = {}; }
+    return parseLrc(data.lyric || "");
+  }
+  if (song.qqSongMid) {
+    try {
+      const lines = await fetchByMid(song.qqSongMid);
+      if (lines && lines.length) return { lines: lines, artist: "" };
+    } catch (e) {}
+  }
+  const q = ((song.title || "") + " " + (song.artist && song.artist !== "未知歌手" ? song.artist : "")).trim();
+  const items = await qqSearch(q);
+  const hit = pickLyricsHit(items, song);
+  if (!hit || !hit.qqSongMid) throw new Error("QQ音乐未找到该歌曲");
+  const lines = await fetchByMid(hit.qqSongMid);
+  if (!lines || !lines.length) throw new Error("QQ音乐没有歌词");
+  song.qqSongMid = hit.qqSongMid;
+  return { lines: lines, artist: "" };
+}
+
 /* ================= 搜索与歌词编排 ================= */
 async function search(q) {
-  const preferred = settings.source === "auto" ? ["lrclib", "netease"] : [settings.source];
-  const sources = preferred.concat(["lrclib", "netease"].filter(function (src) { return preferred.indexOf(src) < 0; }));
+  const preferred = settings.source === "auto" ? ["lrclib", "qq"] : [settings.source];
+  const sources = preferred.concat(["lrclib", "qq"].filter(function (src) { return preferred.indexOf(src) < 0; }));
   let lastErr = null;
   let sawEmpty = false;
   for (const src of sources) {
@@ -557,6 +607,7 @@ async function search(q) {
 }
 async function searchBySource(src, q) {
   if (src === "lrclib") return lrclibSearch(q);
+  if (src === "qq") return qqSearch(q);
   if (src === "netease") return neteaseSearch(q);
   if (src === "mojim") return mojimSearch(q);
   if (src === "mojigeci") return mojigeciSearch(q);
@@ -565,9 +616,9 @@ async function searchBySource(src, q) {
 async function loadMoreResults() {
   const q = state.searchedFor;
   if (!q) return;
-  toast("正在从网易云音乐补充…");
+  toast("正在从 QQ 音乐补充…");
   try {
-    const items = await neteaseSearch(q);
+    const items = await qqSearch(q);
     const seen = new Set(state.results.map(function (r) { return songKey(r); }));
     let added = 0;
     for (const it of items) {
@@ -577,16 +628,16 @@ async function loadMoreResults() {
       state.results.push(it);
       added++;
     }
-    if (added) state.resultsSource = state.resultsSource + " + 网易云";
+    if (added) state.resultsSource = state.resultsSource + " + QQ音乐";
     render();
-    toast(added ? "网易云补充了 " + added + " 条结果" : "网易云没有补充到新结果");
+    toast(added ? "QQ音乐补充了 " + added + " 条结果" : "QQ音乐没有补充到新结果");
   } catch (e) {
-    toast("网易云补充失败：" + (e && e.message ? e.message : e));
+    toast("QQ音乐补充失败：" + (e && e.message ? e.message : e));
   }
 }
 async function loadLyricsForSong(song) {
   let lastErr = null;
-  const order = settings.source === "auto" ? ["lrclib", "netease"] : [settings.source];
+  const order = settings.source === "auto" ? ["lrclib", "qq"] : [settings.source];
   for (const src of order) {
     try {
       const lines = await loadLyricsBySource(src, song);
@@ -598,6 +649,7 @@ async function loadLyricsForSong(song) {
 }
 async function loadLyricsBySource(src, song) {
   if (src === "lrclib") return lrclibLyrics(song);
+  if (src === "qq") return qqLyrics(song);
   if (src === "netease") return neteaseLyrics(song);
   if (src === "mojim") {
     const res = await mojimLyrics(song);
@@ -629,6 +681,8 @@ function addSong(raw) {
     mojigeciUrl: raw.mojigeciUrl || null,
     mojimId: raw.mojimId || null,
     neteaseId: raw.neteaseId || null,
+    qqSongMid: raw.qqSongMid || null,
+    qqSongId: raw.qqSongId || null,
     tag: "会唱",
     addedAt: Date.now(),
     lyrics: Array.isArray(raw.lyrics) ? raw.lyrics : [],
@@ -668,6 +722,8 @@ function normalizeImported(raw) {
     mojigeciUrl: raw.mojigeciUrl || null,
     mojimId: raw.mojimId || null,
     neteaseId: raw.neteaseId || null,
+    qqSongMid: raw.qqSongMid || null,
+    qqSongId: raw.qqSongId || null,
     tag: raw.tag === "想学" ? "想学" : "会唱",
     addedAt: raw.addedAt || Date.now(),
     lyrics: Array.isArray(raw.lyrics) ? raw.lyrics : [],
@@ -942,7 +998,7 @@ function renderSearch() {
   if (state.results.length) {
     let html = '<div class="source-note">来自 ' + esc(state.resultsSource) + ' · ' + state.results.length + ' 条结果</div>';
     if (state.resultsSource === "LRCLIB" && state.results.length >= 20) {
-      html += '<div class="more-row"><button class="load-btn" data-action="more-results" type="button">LRCLIB 最多返回 20 条，点这里用网易云补充更多</button></div>';
+      html += '<div class="more-row"><button class="load-btn" data-action="more-results" type="button">LRCLIB 最多返回 20 条，点这里用 QQ 音乐补充更多</button></div>';
     }
     html += state.results.map(function (r, i) { return resultRowHtml(r, i); }).join("");
     return html;
@@ -1089,8 +1145,8 @@ function renderSettings() {
   $("#settingsBody").innerHTML =
     '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">歌词来源</span></div>'
-    + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("netease", "网易云") + seg("mojim", "Mojim") + '</div></div>'
-    + '<p class="hint">自动：先试 LRCLIB（最稳），再试网易云（模糊搜索、港乐较全）。Mojim 需手动选择并开 VPN。</p>'
+    + '<div class="setting-row"><span class="k"></span><div class="seg">' + seg("auto", "自动") + seg("lrclib", "LRCLIB") + seg("qq", "QQ音乐") + seg("mojim", "Mojim") + '</div></div>'
+    + '<p class="hint">自动：先试 LRCLIB，再试 QQ 音乐（模糊搜索、港乐较全）。Mojim 需手动选择并开 VPN。</p>'
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">数据备份</span></div>'
