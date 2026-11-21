@@ -484,12 +484,24 @@ async function neteaseSearch(q) {
 }
 async function neteaseLyrics(song) {
   async function fetchById(id) {
-    const url = NETEASE + "/api/song/lyric?id=" + encodeURIComponent(id) + "&lv=1&kv=1&tv=-1";
-    const text = await fetchText(url, { headers: { Accept: "application/json", Referer: NETEASE + "/song?id=" + encodeURIComponent(id), "User-Agent": UA } });
-    let data;
-    try { data = JSON.parse(text); } catch (e) { data = {}; }
-    const raw = (data.lrc && data.lrc.lyric) || (data.tlyric && data.tlyric.lyric) || "";
-    return parseLrc(raw);
+    const urls = [
+      NETEASE + "/api/song/lyric?os=pc&id=" + encodeURIComponent(id) + "&lv=-1&kv=-1&tv=-1",
+      NETEASE + "/api/song/lyric?id=" + encodeURIComponent(id) + "&lv=-1&kv=-1&tv=-1",
+      NETEASE + "/api/song/lyric?id=" + encodeURIComponent(id) + "&lv=1&kv=1&tv=-1",
+    ];
+    let lastLines = [];
+    for (const url of urls) {
+      try {
+        const text = await fetchText(url, { headers: { Accept: "application/json", Referer: NETEASE + "/song?id=" + encodeURIComponent(id), "User-Agent": UA } });
+        let data;
+        try { data = JSON.parse(text); } catch (e) { data = {}; }
+        const raw = (data.lrc && data.lrc.lyric) || (data.tlyric && data.tlyric.lyric) || "";
+        const lines = parseLrc(raw);
+        if (lines && lines.length) return lines;
+        lastLines = lines;
+      } catch (e) {}
+    }
+    return lastLines;
   }
   if (song.neteaseId) {
     try {
