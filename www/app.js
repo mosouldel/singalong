@@ -46,6 +46,30 @@ function srcLabel(src) {
   if (src === "mojim") return "Mojim";
   return "魔镜歌词";
 }
+function titleCore(s) {
+  return String(s == null ? "" : s).trim().toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\s*[（(【\[].*$/, "")
+    .replace(/[-–—].*$/, "")
+    .replace(/[，。·,.:：]/g, "");
+}
+function pickLyricsHit(items, song) {
+  const t = titleCore(song.title);
+  const a = titleCore(song.artist === "未知歌手" ? "" : song.artist);
+  if (!items || !items.length) return null;
+  if (t) {
+    if (a) {
+      let hit = items.find(function (i) { return titleCore(i.title) === t && titleCore(i.artist) === a; });
+      if (!hit) hit = items.find(function (i) { return titleCore(i.title) === t && (titleCore(i.artist).indexOf(a) >= 0 || a.indexOf(titleCore(i.artist)) >= 0); });
+      if (hit) return hit;
+    }
+    let hit = items.find(function (i) { return titleCore(i.title) === t; });
+    if (hit) return hit;
+    hit = items.find(function (i) { return titleCore(i.title).indexOf(t) >= 0 || t.indexOf(titleCore(i.title)) >= 0; });
+    if (hit) return hit;
+  }
+  return null;
+}
 
 let toastTimer = null;
 function hideToast() {
@@ -186,14 +210,29 @@ async function lrclibSearch(q) {
   }).filter(function (s) { return s.title; });
 }
 async function lrclibLyrics(song) {
-  if (!song.lrclibId) throw new Error("缺少 LRCLIB 歌曲 ID");
-  const text = await fetchText(LRCLIB + "/get/" + song.lrclibId, { headers: { Accept: "application/json" } });
-  const data = JSON.parse(text);
-  const synced = data.syncedLyrics || "";
-  const plain = data.plainLyrics || "";
-  if (synced) return parseLrc(synced);
-  if (plain) return plain.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
-  throw new Error("这首歌暂无歌词");
+  async function fetchById(id) {
+    const text = await fetchText(LRCLIB + "/get/" + id, { headers: { Accept: "application/json" } });
+    const data = JSON.parse(text);
+    const synced = data.syncedLyrics || "";
+    const plain = data.plainLyrics || "";
+    if (synced) return parseLrc(synced);
+    if (plain) return plain.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    return [];
+  }
+  if (song.lrclibId) {
+    try {
+      const lines = await fetchById(song.lrclibId);
+      if (lines && lines.length) return lines;
+    } catch (e) {}
+  }
+  const q = ((song.title || "") + " " + (song.artist && song.artist !== "未知歌手" ? song.artist : "")).trim();
+  const items = await lrclibSearch(q);
+  const hit = pickLyricsHit(items, song);
+  if (!hit || !hit.lrclibId) throw new Error("LRCLIB 未找到该歌曲");
+  const lines = await fetchById(hit.lrclibId);
+  if (!lines || !lines.length) throw new Error("LRCLIB 这首歌暂无歌词");
+  song.lrclibId = hit.lrclibId;
+  return lines;
 }
 function parseLrc(lrc) {
   const out = [];
@@ -444,23 +483,28 @@ async function neteaseSearch(q) {
   }).filter(function (s) { return s.title; });
 }
 async function neteaseLyrics(song) {
-  let id = song.neteaseId;
-  if (!id) {
-    const q = ((song.title || "") + " " + (song.artist || "未知歌手")).trim();
-    const items = await neteaseSearch(q);
-    let hit = items.find(function (i) { return i.title === song.title || (song.title && i.title && (song.title.indexOf(i.title) >= 0 || i.title.indexOf(song.title) >= 0)); });
-    if (!hit) hit = items[0];
-    if (hit && hit.neteaseId) id = hit.neteaseId;
+  async function fetchById(id) {
+    const url = NETEASE + "/api/song/lyric?id=" + encodeURIComponent(id) + "&lv=1&kv=1&tv=-1";
+    const text = await fetchText(url, { headers: { Accept: "application/json", Referer: NETEASE + "/song?id=" + encodeURIComponent(id), "User-Agent": UA } });
+    let data;
+    try { data = JSON.parse(text); } catch (e) { data = {}; }
+    const raw = (data.lrc && data.lrc.lyric) || (data.tlyric && data.tlyric.lyric) || "";
+    return parseLrc(raw);
   }
-  if (!id) throw new Error("网易云未找到该歌曲");
-  const url = NETEASE + "/api/song/lyric?id=" + encodeURIComponent(id) + "&lv=1&kv=1&tv=-1";
-  const text = await fetchText(url, { headers: { Accept: "application/json", Referer: NETEASE + "/song?id=" + encodeURIComponent(id), "User-Agent": UA } });
-  let data;
-  try { data = JSON.parse(text); } catch (e) { data = {}; }
-  const raw = (data.lrc && data.lrc.lyric) || (data.tlyric && data.tlyric.lyric) || "";
-  const lines = parseLrc(raw);
-  if (lines.length) return { lines: lines, artist: "" };
-  throw new Error("网易云没有解析到歌词");
+  if (song.neteaseId) {
+    try {
+      const lines = await fetchById(song.neteaseId);
+      if (lines && lines.length) return { lines: lines, artist: "" };
+    } catch (e) {}
+  }
+  const q = ((song.title || "") + " " + (song.artist && song.artist !== "未知歌手" ? song.artist : "")).trim();
+  const items = await neteaseSearch(q);
+  const hit = pickLyricsHit(items, song);
+  if (!hit || !hit.neteaseId) throw new Error("网易云未找到该歌曲");
+  const lines = await fetchById(hit.neteaseId);
+  if (!lines || !lines.length) throw new Error("网易云没有歌词");
+  song.neteaseId = hit.neteaseId;
+  return { lines: lines, artist: "" };
 }
 
 /* ================= 搜索与歌词编排 ================= */
@@ -509,10 +553,7 @@ async function loadMoreResults() {
 }
 async function loadLyricsForSong(song) {
   let lastErr = null;
-  const order = (settings.source === "auto" ? ["lrclib", "netease"] : [settings.source]).filter(function (src) {
-    if (src === "lrclib" && !song.lrclibId) return false;
-    return true;
-  });
+  const order = settings.source === "auto" ? ["lrclib", "netease"] : [settings.source];
   for (const src of order) {
     try {
       const lines = await loadLyricsBySource(src, song);
