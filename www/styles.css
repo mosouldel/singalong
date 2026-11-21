@@ -132,6 +132,7 @@ input { font-family: inherit; }
 .error-box { background: #fdecec; color: #b3261e; border-radius: 14px; padding: 14px; font-size: 13px; line-height: 1.6; }
 .retry-btn { display: block; margin-top: 10px; background: #fff; color: var(--danger); border: 1px solid #f3c4c1; border-radius: 10px; padding: 8px 16px; font-size: 13px; }
 .source-note { font-size: 12px; color: var(--muted); margin: 8px 4px; }
+.more-row { margin: 4px 4px 10px; }
 
 /* Bottom nav */
 .bottomnav {

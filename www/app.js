@@ -408,6 +408,28 @@ async function searchBySource(src, q) {
   if (src === "mojim") return mojimSearch(q);
   return mojigeciSearch(q);
 }
+async function loadMoreResults() {
+  const q = state.searchedFor;
+  if (!q) return;
+  toast("正在从魔镜歌词补充…");
+  try {
+    const items = await mojigeciSearch(q);
+    const seen = new Set(state.results.map(function (r) { return songKey(r); }));
+    let added = 0;
+    for (const it of items) {
+      const key = songKey(it);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      state.results.push(it);
+      added++;
+    }
+    if (added) state.resultsSource = state.resultsSource + " + 魔镜歌词";
+    render();
+    toast(added ? "魔镜补充了 " + added + " 条结果" : "魔镜没有补充到新结果");
+  } catch (e) {
+    toast("魔镜补充失败：" + (e && e.message ? e.message : e));
+  }
+}
 async function loadLyricsForSong(song) {
   let lastErr = null;
   const order = ["lrclib", "mojigeci", "mojim"].filter(function (src) {
@@ -762,6 +784,9 @@ function renderSearch() {
   }
   if (state.results.length) {
     let html = '<div class="source-note">来自 ' + esc(state.resultsSource) + ' · ' + state.results.length + ' 条结果</div>';
+    if (state.resultsSource === "LRCLIB" && state.results.length >= 20) {
+      html += '<div class="more-row"><button class="load-btn" data-action="more-results" type="button">LRCLIB 最多返回 20 条，点这里用魔镜补充更多</button></div>';
+    }
     html += state.results.map(function (r, i) { return resultRowHtml(r, i); }).join("");
     return html;
   }
@@ -1248,6 +1273,8 @@ function bindEvents() {
     if (rnd) { openRandomOrder(); return; }
     const oh = e.target.closest("[data-action='open-order-history']");
     if (oh) { openOrderHistory(); return; }
+    const more = e.target.closest("[data-action='more-results']");
+    if (more) { loadMoreResults(); return; }
   });
 
   $("#detailBack").addEventListener("click", closeDetail);
