@@ -158,6 +158,7 @@ async function nativeHttp(url, opts) {
   return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
 }
 async function webFetch(url, opts) {
+  opts = opts || {};
   const method = (opts.method || "GET").toUpperCase();
   const headers = Object.assign({}, opts.headers || {});
   const init = { method: method, headers: headers };
