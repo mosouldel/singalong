@@ -1,0 +1,12 @@
+{
+  "appId": "com.singalong.app",
+  "appName": "我会唱",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
