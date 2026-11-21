@@ -251,6 +251,7 @@ async function mojigeciSearch(q) {
   fetchers.push(function () { return fetchText(MOJIGECI + "/lyrics/" + qq); });
   const out = [];
   const seen = new Set();
+  let lastErr = null;
   for (const getHtml of fetchers) {
     try {
       const html = await getHtml();
@@ -260,9 +261,10 @@ async function mojigeciSearch(q) {
         seen.add(key);
         out.push(it);
       }
-    } catch (e) {}
+    } catch (e) { lastErr = e; }
     if (out.length >= 40) break;
   }
+  if (!out.length && lastErr) throw lastErr;
   return out;
 }
 function parseMojigeciSearch(html, mustContain) {
