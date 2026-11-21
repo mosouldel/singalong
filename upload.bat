@@ -26,6 +26,8 @@ if "%REPO%"=="" (
   exit /b 1
 )
 
+set "REPO=%REPO:github.com/=mosouldel@github.com/%"
+
 "%GIT%" init >nul 2>nul
 "%GIT%" config user.name "singalong" >nul 2>nul
 "%GIT%" config user.email "singalong@local" >nul 2>nul
@@ -36,9 +38,8 @@ if "%REPO%"=="" (
 "%GIT%" remote add origin "%REPO%"
 
 echo.
-echo   IMPORTANT:
-echo   GitHub does NOT accept your account password.
-echo   When asked for a password, PASTE your Personal Access Token.
+echo   Username is set automatically (mosouldel).
+echo   When asked for PASSWORD, paste your Personal Access Token.
 echo   The token will NOT be visible while typing - that is normal.
 echo.
 "%GIT%" -c credential.helper= push -u origin main
