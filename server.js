@@ -80,6 +80,9 @@ async function handleProxy(req, res, reqUrl) {
     headers["Cookie"] = "appver=1.5.2";
     headers["Accept-Encoding"] = "identity";
   }
+  if (target.indexOf("c.y.qq.com") >= 0 || target.indexOf("y.qq.com") >= 0) {
+    headers["Referer"] = "https://y.qq.com/portal/player.html";
+  }
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
   let upstream;
   if (target.indexOf("music.163.com") >= 0) {
