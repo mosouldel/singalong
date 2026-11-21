@@ -1175,13 +1175,14 @@ function renderSettings() {
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">数据备份</span></div>'
-    + '<div class="setting-row"><span class="k">导出备份</span><button class="add-btn" id="exportBtn" type="button">导出</button></div>'
+    + '<div class="setting-row"><span class="k">保存备份文件</span><button class="add-btn" id="exportBtn" type="button">保存</button></div>'
+    + '<div class="setting-row"><span class="k">分享备份</span><button class="add-btn" id="shareBtn" type="button">分享</button></div>'
     + '<div class="setting-row"><span class="k">导入备份</span><button class="add-btn" id="importBtn" type="button">导入</button></div>'
     + '</div>'
     + '<div class="setting-group">'
     + '<div class="setting-row"><span class="k">清空全部数据</span><button class="danger-btn" id="clearAllBtn" type="button">清空</button></div>'
     + '</div>'
-    + '<p class="hint">数据只保存在本机（浏览器/App 本地存储），不上传任何服务器。出门前建议先「导出」备份。</p>'
+    + '<p class="hint">数据只保存在本机（浏览器/App 本地存储），不上传任何服务器。出门前建议先「保存」备份，换手机或重装后用「导入」恢复。</p>'
     + '<div class="signature">作者：Song</div>';
 }
 
@@ -1372,7 +1373,7 @@ function getNativePlugin(name) {
   return null;
 }
 function exportPayload() {
-  return JSON.stringify({ app: "singalong", version: 2, exportedAt: new Date().toISOString(), songs: library, requests: requests }, null, 2);
+  return JSON.stringify({ app: "singalong", version: 3, exportedAt: new Date().toISOString(), songs: library, requests: requests, settings: settings }, null, 2);
 }
 function downloadBlob(name, payload) {
   const blob = new Blob([payload], { type: "application/json" });
@@ -1382,78 +1383,189 @@ function downloadBlob(name, payload) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
 }
-async function exportData() {
-  const name = "singalong-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+function countNotes(songs) {
+  let n = 0;
+  (songs || []).forEach(function (s) {
+    if (s && s.notes && typeof s.notes === "object") {
+      Object.keys(s.notes).forEach(function (k) { if (s.notes[k]) n++; });
+    }
+  });
+  return n;
+}
+function backupFilename() {
+  return "singalong-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+}
+function previewList(items) {
+  return '<div style="background:#f7f8fc;border-radius:10px;padding:10px 14px;margin:0 0 12px">'
+    + items.map(function (t) { return '<div style="font-size:13px;color:#4b5063;padding:3px 0">' + esc(t) + '</div>'; }).join("")
+    + '</div>';
+}
+function openExportPreview() {
+  const name = backupFilename();
+  $("#modalCard").innerHTML =
+    '<h3>保存备份文件</h3>'
+    + '<p class="ml">先把本机数据写入一个 JSON 文件，再用「导入备份」即可恢复。</p>'
+    + previewList([
+        "歌曲 " + library.length + " 首",
+        "歌词备注 " + countNotes(library) + " 条",
+        "点歌记录 " + requests.length + " 条",
+        "设置 " + Object.keys(settings || {}).length + " 项",
+      ])
+    + '<p class="ml" style="font-size:12px">文件名：' + esc(name) + '</p>'
+    + '<div class="modal-actions"><button class="btn-cancel" id="expCancel" type="button">取消</button>'
+    + '<button class="btn-primary" id="expOk" type="button">保存</button></div>';
+  showModal();
+  $("#expCancel").onclick = closeModal;
+  $("#expOk").onclick = function () { closeModal(); saveBackup(name); };
+}
+async function saveBackup(name) {
   const payload = exportPayload();
   if (isNative()) {
-    try {
-      await shareFile(name, payload);
-      return;
-    } catch (e) {}
     const Filesystem = getNativePlugin("Filesystem");
     const Share = getNativePlugin("Share");
     if (Filesystem && Share) {
       try {
         const res = await Filesystem.writeFile({ path: name, data: payload, directory: "CACHE", encoding: "UTF8", recursive: true });
-        await Share.share({ title: "我会唱 数据备份", text: "Singalong 曲库备份", url: res.uri, dialogTitle: "导出曲库" });
+        await Share.share({ title: "我会唱 数据备份", text: "Singalong 曲库备份（" + library.length + " 首）", url: res.uri, dialogTitle: "保存备份文件" });
         return;
       } catch (e) {
-        toast("导出失败：" + (e && e.message ? e.message : e));
+        toast("保存失败：" + (e && e.message ? e.message : e));
         return;
       }
     }
-    toast("导出失败：系统分享不可用");
+    toast("保存失败：系统分享不可用");
     return;
   }
   downloadBlob(name, payload);
-  toast("已导出");
+  toast("已保存：" + name);
 }
-function shareFile(name, payload) {
-  return new Promise(function (resolve, reject) {
-    if (!navigator.share) { reject(new Error("无系统分享")); return; }
-    try {
-      const file = new File([payload], name, { type: "application/json" });
-      const data = { title: "我会唱 数据备份", text: "Singalong 曲库备份", files: [file] };
-      if (navigator.canShare && !navigator.canShare(data)) { reject(new Error("系统不支持分享文件")); return; }
-      navigator.share(data).then(function () { resolve(true); }, reject);
-    } catch (e) { reject(e); }
+async function shareBackupNow() {
+  const name = backupFilename();
+  const payload = exportPayload();
+  if (isNative()) {
+    const Filesystem = getNativePlugin("Filesystem");
+    const Share = getNativePlugin("Share");
+    if (Filesystem && Share) {
+      try {
+        const res = await Filesystem.writeFile({ path: name, data: payload, directory: "CACHE", encoding: "UTF8", recursive: true });
+        await Share.share({ title: "我会唱 数据备份", text: "Singalong 曲库备份（" + library.length + " 首）", url: res.uri, dialogTitle: "分享备份" });
+        return;
+      } catch (e) {
+        toast("分享失败：" + (e && e.message ? e.message : e));
+        return;
+      }
+    }
+    toast("分享失败：系统分享不可用");
+    return;
+  }
+  downloadBlob(name, payload);
+  toast("已分享：" + name);
+}
+function requestSig(r) { return (r.key || "") + "|" + (r.dateKey || "") + "|" + (r.createdAt || ""); }
+function mergeSong(target, raw) {
+  ["album", "lyricist", "composer", "lrclibId", "mojigeciUrl", "mojimId", "neteaseId", "qqSongMid", "qqSongId"].forEach(function (f) {
+    if (!target[f]) target[f] = raw[f] || target[f];
   });
+  if (!target.source || target.source === "导入") target.source = raw.source || target.source;
+  if (!target.lyrics || !target.lyrics.length) target.lyrics = Array.isArray(raw.lyrics) ? raw.lyrics : [];
+  target.notes = target.notes || {};
+  if (raw.notes && typeof raw.notes === "object") {
+    Object.keys(raw.notes).forEach(function (k) {
+      if (raw.notes[k] && !target.notes[k]) target.notes[k] = raw.notes[k];
+    });
+  }
+  if (raw.tag === "想学" && target.tag === "会唱") target.tag = "想学";
+  if (!target.addedAt) target.addedAt = raw.addedAt || Date.now();
+}
+function planImport(data) {
+  const obj = data && typeof data === "object" ? data : {};
+  const arr = Array.isArray(obj) ? obj : (Array.isArray(obj.songs) ? obj.songs : null);
+  if (!arr) throw new Error("格式不正确：缺少歌曲列表");
+  let add = 0, merge = 0, notes = 0, reqs = 0;
+  const existing = {};
+  library.forEach(function (s) { existing[songKey(s)] = s; });
+  const seen = {};
+  const songPlan = [];
+  arr.forEach(function (raw) {
+    if (!raw || !raw.title) return;
+    const norm = normalizeImported(raw);
+    const k = songKey(norm);
+    const target = existing[k];
+    if (target) { merge++; songPlan.push({ mode: "merge", target: target, raw: norm }); }
+    else if (!seen[k]) { add++; seen[k] = true; songPlan.push({ mode: "add", raw: norm }); }
+    notes += countNotes([norm]);
+  });
+  if (Array.isArray(obj.requests)) reqs = obj.requests.length;
+  return {
+    add: add, merge: merge, notes: notes, reqs: reqs,
+    settings: obj.settings && typeof obj.settings === "object" ? Object.keys(obj.settings).length : 0,
+    songPlan: songPlan,
+    requestsRaw: Array.isArray(obj.requests) ? obj.requests : null,
+    settingsRaw: obj.settings,
+  };
+}
+function applyImport(plan) {
+  plan.songPlan.forEach(function (p) {
+    if (p.mode === "add") library.push(p.raw);
+    else mergeSong(p.target, p.raw);
+  });
+  let addedRequests = 0;
+  if (plan.requestsRaw) {
+    const have = new Set(requests.map(function (r) { return r.id; }));
+    const seen = new Set(requests.map(requestSig));
+    plan.requestsRaw.forEach(function (raw) {
+      if (!raw) return;
+      const id = raw.id || uid();
+      if (have.has(id)) return;
+      const rec = {
+        id: id,
+        key: raw.key || (((raw.title || "") + "||" + (raw.artist || "")).toLowerCase()),
+        title: raw.title || "",
+        artist: raw.artist || "未知歌手",
+        dateKey: raw.dateKey || (raw.createdAt ? dateKeyOf(new Date(raw.createdAt)) : todayKey()),
+        createdAt: raw.createdAt || Date.now(),
+      };
+      const sig = requestSig(rec);
+      if (seen.has(sig)) return;
+      have.add(id); seen.add(sig);
+      requests.push(rec); addedRequests++;
+    });
+  }
+  if (plan.settingsRaw && typeof plan.settingsRaw === "object") {
+    settings = Object.assign({ source: "auto" }, settings, plan.settingsRaw);
+    if (settings.source === "mojigeci" || settings.source === "netease") settings.source = "auto";
+    saveSettings();
+  }
+  saveLibrary(); saveRequests(); render();
+  toast("导入完成：新增 " + plan.add + " 首，合并 " + plan.merge + " 首，恢复 " + addedRequests + " 条点歌记录");
+}
+function openImportPreview(plan) {
+  $("#modalCard").innerHTML =
+    '<h3>导入备份预览</h3>'
+    + '<p class="ml">确认无误后再写入。重复歌曲会合并，已有备注不会被覆盖。</p>'
+    + previewList([
+        "歌曲新增 " + plan.add + " 首、合并 " + plan.merge + " 首",
+        "歌词备注 " + plan.notes + " 条",
+        "点歌记录 " + plan.reqs + " 条",
+        "设置 " + plan.settings + " 项",
+      ])
+    + '<div class="modal-actions"><button class="btn-cancel" id="impCancel" type="button">取消</button>'
+    + '<button class="btn-primary" id="impOk" type="button">导入</button></div>';
+  showModal();
+  $("#impCancel").onclick = closeModal;
+  $("#impOk").onclick = function () { closeModal(); applyImport(plan); };
 }
 function importData(file) {
   const reader = new FileReader();
   reader.onload = function () {
+    let plan;
     try {
-      const data = JSON.parse(reader.result);
-      const arr = Array.isArray(data) ? data : (data.songs || []);
-      if (!Array.isArray(arr)) throw new Error("格式不正确");
-      let added = 0;
-      for (const raw of arr) {
-        if (raw && raw.title && !library.some(function (x) { return songKey(x) === songKey(raw); })) {
-          library.push(normalizeImported(raw)); added++;
-        }
-      }
-      let addedRequests = 0;
-      if (Array.isArray(data.requests)) {
-        const have = new Set(requests.map(function (r) { return r.id; }));
-        for (const raw of data.requests) {
-          if (!raw) continue;
-          const id = raw.id || uid();
-          if (have.has(id)) continue;
-          have.add(id);
-          requests.push({
-            id: id,
-            key: raw.key || (((raw.title || "") + "||" + (raw.artist || "")).toLowerCase()),
-            title: raw.title || "",
-            artist: raw.artist || "未知歌手",
-            dateKey: raw.dateKey || (raw.createdAt ? dateKeyOf(new Date(raw.createdAt)) : todayKey()),
-            createdAt: raw.createdAt || Date.now(),
-          });
-          addedRequests++;
-        }
-      }
-      saveLibrary(); saveRequests(); render();
-      toast("导入完成：新增 " + added + " 首，恢复 " + addedRequests + " 条点歌记录");
-    } catch (e) { toast("导入失败：" + (e && e.message ? e.message : e)); }
+      plan = planImport(JSON.parse(reader.result));
+    } catch (e) {
+      toast("导入失败：" + (e && e.message ? e.message : e));
+      return;
+    }
+    openImportPreview(plan);
   };
   reader.readAsText(file);
 }
@@ -1531,7 +1643,8 @@ function bindEvents() {
   $("#settingsBody").addEventListener("click", function (e) {
     const seg = e.target.closest("[data-source]");
     if (seg) { settings.source = seg.dataset.source; saveSettings(); renderSettings(); return; }
-    if (e.target.closest("#exportBtn")) { exportData(); return; }
+    if (e.target.closest("#exportBtn")) { openExportPreview(); return; }
+    if (e.target.closest("#shareBtn")) { shareBackupNow(); return; }
     if (e.target.closest("#importBtn")) { $("#importFile").click(); return; }
     if (e.target.closest("#clearAllBtn")) {
       openConfirm("清空曲库", "确定删除全部已收录歌曲和备注吗？此操作不可恢复。", "清空", true, function () { library = []; saveLibrary(); render(); });
